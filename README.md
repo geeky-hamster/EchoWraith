@@ -1,247 +1,109 @@
-  
-```
-         ██╗███╗   ██╗███████╗██╗██████╗ ███████╗██╗     ██╗████████╗██╗   ██╗
-         ██║████╗  ██║██╔════╝██║██╔══██╗██╔════╝██║     ██║╚══██╔══╝╚██╗ ██╔╝
-         ██║██╔██╗ ██║█████╗  ██║██║  ██║█████╗  ██║     ██║   ██║    ╚████╔╝ 
-         ██║██║╚██╗██║██╔══╝  ██║██║  ██║██╔══╝  ██║     ██║   ██║     ╚██╔╝  
-         ██║██║ ╚████║██║     ██║██████╔╝███████╗███████╗██║   ██║      ██║   
-         ╚═╝╚═╝  ╚═══╝╚═╝     ╚═╝╚═════╝ ╚══════╝╚══════╝╚═╝   ╚═╝      ╚═╝   
-```
+# 🎯 INFIDELITY
+
 <div align="center">
-  <strong>Advanced WiFi Security Analysis Platform</strong>
-  <br>
-  <br>
-  <a href="#overview">Overview</a> •
-  <a href="#features">Features</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#technical-details">Technical Details</a>
-  <br>
-  <br>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
-  <a href="VERSION"><img src="https://img.shields.io/badge/Version-2.1.0-green.svg" alt="Version"></a>
-  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
-  <br>
-  <br>
+
+```
+════════════════════════════════════════════════════════════════════════
+██╗███╗   ██╗███████╗██╗██████╗ ███████╗██╗     ██╗████████╗██╗   ██╗
+██║████╗  ██║██╔════╝██║██╔══██╗██╔════╝██║     ██║╚══██╔══╝╚██╗ ██╔╝
+██║██╔██╗ ██║█████╗  ██║██║  ██║█████╗  ██║     ██║   ██║    ╚████╔╝ 
+██║██║╚██╗██║██╔══╝  ██║██║  ██║██╔══╝  ██║     ██║   ██║     ╚██╔╝  
+██║██║ ╚████║██║     ██║██████╔╝███████╗███████╗██║   ██║      ██║   
+╚═╝╚═╝  ╚═══╝╚═╝     ╚═╝╚═════╝ ╚══════╝╚══════╝╚═╝   ╚═╝      ╚═╝   
+════════════════════════════════════════════════════════════════════════
+```
+
+**[ WiFi Security Testing Framework ]**
+
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Linux-orange.svg)](https://www.linux.org/)
+
 </div>
 
----
+> 🔥 Your Ultimate WiFi Security Testing Arsenal
 
-## Overview
+## 🚀 Overview
 
-Infidelity is a sophisticated platform designed for WiFi security analysis and testing. Built from the ground up with a focus on performance and reliability, it provides a comprehensive suite of tools for network security professionals and researchers.
+Infidelity is a powerful WiFi security analysis toolkit designed for network administrators and security professionals. With its sleek interface and comprehensive feature set, it makes testing your network security both effective and enjoyable.
 
-## Core Framework
+## ⚡ Features
 
-Infidelity is built on three custom-developed frameworks that form its technological foundation:
+- 🔍 **Network Scanner**: Discover and analyze nearby networks
+- 💣 **Deauthentication**: Advanced client management
+- 🔑 **WPS Analysis**: Test WPS security implementations
+- 🎯 **Handshake Capture**: Grab and analyze handshakes
+- 📊 **History Tracking**: Monitor all your testing activities
+- 🧰 **System Check**: Verify tool compatibility and requirements
 
-### RF Security Toolkit (v1.2.0)
-- Custom RF signal processing and analysis
-- Advanced frequency monitoring and manipulation
-- Real-time signal strength assessment
-- Proprietary channel hopping algorithms
+## 🛠️ Installation
 
-### Wireless Framework (v2.1.0)
-- Low-level wireless interface management
-- Advanced monitor mode implementations
-- Custom packet injection methods
-- Proprietary driver interfacing system
+### Quick Install (Recommended)
+```bash
+curl -sSL https://raw.githubusercontent.com/your-username/infidelity/main/install.sh | sudo bash
+```
 
-### Network Protocol Analyzer (v1.0.3)
-- Custom protocol dissection engine
-- Real-time authentication analysis
-- Advanced handshake processing
-- Proprietary packet analysis algorithms
-
-## Features
-
-- Network Discovery: Advanced scanning and analysis of nearby WiFi networks
-- Client Management: Sophisticated client connection control and analysis
-- WPS Security Analysis: In-depth testing of WPS implementation security
-- Handshake Analysis: Capture and analysis of WPA/WPA2 authentication handshakes
-
-## Installation
-
-### Prerequisites
-
-- Python 3.6 or higher
-- Linux-based operating system
-- Compatible wireless network adapter with monitor mode support
-- Root privileges for network operations
-
-### Setup
-
+### Manual Installation
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/infidelity.git
+git clone https://github.com/your-username/infidelity.git
 cd infidelity
 ```
 
-2. Install Python dependencies:
+2. Install dependencies:
 ```bash
-pip3 install -r requirements.txt
+sudo apt update
+sudo apt install -y python3 python3-pip aircrack-ng reaver
+sudo pip3 install -r requirements.txt
 ```
 
-## Usage
-
-Launch Infidelity with root privileges:
-
+3. Make it executable:
 ```bash
-sudo python3 infidelity.py
+sudo chmod +x infidelity.py
+sudo ln -s $(pwd)/infidelity.py /usr/local/bin/infidelity
 ```
 
-### Core Modules
+## 🎮 Usage
 
-1. **Network Scanner**
-   - Comprehensive network discovery
-   - Real-time signal analysis
-   - Detailed network information gathering
+1. Start Infidelity:
+```bash
+sudo infidelity
+```
 
-2. **Client Management**
-   - Advanced client connection control
-   - Real-time client monitoring
-   - Connection status analysis
+2. Select a module:
+- `1` - System Check
+- `2` - Network Scanner
+- `3` - Deauthentication
+- `4` - WPS Analysis
+- `5` - Handshake Capture
+- `6` - View History
+- `7` - Clean Workspace
 
-3. **WPS Security Analysis**
-   - In-depth WPS security testing
-   - Multiple analysis methods
-   - Detailed vulnerability reporting
+## 🎯 Requirements
 
-4. **Handshake Analysis**
-   - Automated handshake capture
-   - Real-time protocol analysis
-   - Detailed authentication monitoring
-
-## Technical Details
-
-### Custom Libraries
-
-Infidelity utilizes several proprietary libraries developed specifically for advanced wireless security analysis:
-
-- **rf-security-toolkit**: Custom RF analysis and manipulation
-  - Signal processing engine
-  - Frequency analysis tools
-  - Channel monitoring system
-  - Power level assessment
-
-- **wireless-framework**: Advanced wireless interface management
-  - Interface abstraction layer
-  - Monitor mode optimization
-  - Packet injection system
-  - Driver compatibility layer
-
-- **network-proto-analyzer**: Sophisticated protocol analysis
-  - Custom packet dissection
-  - Authentication flow analysis
-  - Handshake verification
-  - Real-time traffic assessment
-
-### Version Control
-
-Infidelity follows semantic versioning (MAJOR.MINOR.PATCH):
-- Current Version: 2.1.0
-- Release Date: January 15, 2024
-- [View Changelog](CHANGELOG.md)
-
-## Security Notice
-
-Infidelity is designed for authorized security testing and research purposes only. Usage of this tool on networks without explicit permission is illegal and unethical.
-
-## Requirements
-
-- Linux-based operating system
 - Python 3.6+
 - Root privileges
-- Monitor mode capable wireless adapter
+- Compatible wireless adapter supporting monitor mode
+- Linux-based operating system
 
-## Installation Methods
+## 🛡️ Disclaimer
 
-### Universal Linux Install (Recommended)
-You can install Infidelity on any Linux distribution using our universal installer:
+This tool is designed for authorized security testing only. Always obtain proper permission before testing any networks you don't own.
 
-```bash
-curl -sSL https://raw.githubusercontent.com/geeky-hamster/Infidelity/main/install.sh | sudo bash
-```
+## 🤝 Contributing
 
-The universal installer supports:
-- Debian/Ubuntu (apt)
-- Fedora (dnf)
-- RHEL/CentOS (yum)
-- Arch Linux (pacman)
-- OpenSUSE (zypper)
+Contributions are welcome! Feel free to:
+- 🐛 Report bugs
+- 💡 Suggest features
+- 🔧 Submit pull requests
 
-The installer will:
-- Detect your Linux distribution and package manager
-- Install required system dependencies
-- Create a Python virtual environment
-- Install Python packages
-- Set up system-wide executable
-- Configure workspace directories
-- Set appropriate permissions
+## 📜 License
 
-### Manual Installation
-For manual installation:
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-1. Clone the repository:
-```bash
-git clone https://github.com/geeky-hamster/Infidelity.git
-cd Infidelity
-```
+## 🌟 Credits
 
-2. Install dependencies (example for Debian/Ubuntu):
-```bash
-# For Debian/Ubuntu
-sudo apt-get update
-sudo apt-get install -y python3-pip python3-venv aircrack-ng reaver
+Created with ❤️ by [Your Name]
 
-# For Fedora
-sudo dnf install -y python3 python3-pip python3-virtualenv aircrack-ng reaver
-
-# For Arch Linux
-sudo pacman -S python python-pip python-virtualenv aircrack-ng reaver
-
-# For OpenSUSE
-sudo zypper install -y python3 python3-pip python3-virtualenv aircrack-ng reaver
-```
-
-3. Create and activate virtual environment:
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-4. Install Python packages:
-```bash
-pip3 install --upgrade pip
-pip3 install -r requirements.txt
-```
-
-5. Run Infidelity:
-```bash
-sudo python3 infidelity.py
-```
-
-## Repository
-
-The official repository for Infidelity is maintained at:
-[https://github.com/geeky-hamster/Infidelity.git](https://github.com/geeky-hamster/Infidelity.git)
-
-## Contributing
-
-We welcome contributions! Please follow these steps:
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-For more details, see our [Contributing Guidelines](CONTRIBUTING.md).
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Disclaimer
-
-The authors of Infidelity are not responsible for any misuse or damage caused by this program. This tool is for educational and authorized testing purposes only. 
+---
+*Remember: With great power comes great responsibility. Use wisely!* 🦸‍♂️ 
