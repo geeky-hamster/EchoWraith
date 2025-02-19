@@ -250,65 +250,64 @@ def get_interface():
     try:
         interfaces = []
         
-        # Method 1: iwconfig
+        # Method 1: Using iwconfig
         result = subprocess.run(['iwconfig'], capture_output=True, text=True)
         for line in result.stdout.split('\n'):
             if 'IEEE 802.11' in line:
-                iface = line.split()[0]
-                interfaces.append(iface)
-
-        # Method 2: iw dev
-        if not interfaces:
-            result = subprocess.run(['iw', 'dev'], capture_output=True, text=True)
-            for line in result.stdout.split('\n'):
-                if 'Interface' in line:
-                    iface = line.split('Interface')[1].strip()
-                    interfaces.append(iface)
-
-        # Method 3: Check /sys/class/net for wireless devices
+                interface = line.split()[0]
+                interfaces.append(interface)
+        
+        # Method 2: Check /sys/class/net for wireless devices
         if not interfaces:
             for iface in os.listdir('/sys/class/net'):
                 if os.path.exists(f'/sys/class/net/{iface}/wireless'):
                     interfaces.append(iface)
-
+        
         if not interfaces:
             console.print("[red]No wireless interfaces found![/red]")
-            console.print("[yellow]Please ensure your wireless adapter is connected and recognized.[/yellow]")
             return None
-
-        # Display available interfaces in a table
+        
+        # Create selection table
         table = Table(title="Available Wireless Interfaces")
-        table.add_column("Index", style="cyan")
+        table.add_column("Option", style="cyan", justify="right")
         table.add_column("Interface", style="green")
-        table.add_column("Status", style="yellow")
-
-        for idx, iface in enumerate(interfaces, 1):
-            # Get interface status
-            status = "Unknown"
-            try:
-                result = subprocess.run(['iwconfig', iface], capture_output=True, text=True)
-                if 'Mode:Monitor' in result.stdout:
-                    status = "Monitor Mode"
-                elif 'Mode:Managed' in result.stdout:
-                    status = "Managed Mode"
-            except:
-                pass
-            table.add_row(str(idx), iface, status)
-
+        
+        for i, interface in enumerate(interfaces, 1):
+            table.add_row(str(i), interface)
+        
         console.print(table)
-
+        
         while True:
             try:
-                choice = int(input("\nSelect interface number: ")) - 1
-                if 0 <= choice < len(interfaces):
-                    return interfaces[choice]
+                choice = int(input("\nSelect interface: "))
+                if 1 <= choice <= len(interfaces):
+                    return interfaces[choice-1]
+                else:
+                    console.print("[red]Invalid choice. Please try again.[/red]")
             except ValueError:
-                pass
-            console.print("[red]Invalid choice. Please try again.[/red]")
-
+                console.print("[red]Invalid input. Please enter a number.[/red]")
+        
     except Exception as e:
-        console.print(f"[red]Error detecting interfaces: {str(e)}[/red]")
+        console.print(f"[red]Error getting wireless interfaces: {str(e)}[/red]")
         return None
+
+def check_wireless_tools():
+    """Check if required wireless tools are available"""
+    required_tools = ['iwconfig', 'airmon-ng', 'airodump-ng', 'aireplay-ng']
+    missing_tools = []
+    
+    for tool in required_tools:
+        try:
+            subprocess.run([tool, '--help'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            missing_tools.append(tool)
+    
+    if missing_tools:
+        console.print(f"[red]Missing required tools: {', '.join(missing_tools)}[/red]")
+        console.print("[yellow]Please install aircrack-ng and wireless-tools packages.[/yellow]")
+        return False
+    
+    return True
 
 def get_temp_path(filename):
     """Get path for temporary files in the data directory"""

