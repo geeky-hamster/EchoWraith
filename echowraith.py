@@ -297,15 +297,17 @@ class EchoWraith:
     def display_banner(self):
         """Display the toolkit banner"""
         banner = """
+═══════════════════════════════════════════════════════════════════════════
 ███████╗ ██████╗██╗  ██╗ ██████╗ ██╗    ██╗██████╗  █████╗ ██╗████████╗██╗  ██╗
 ██╔════╝██╔════╝██║  ██║██╔═══██╗██║    ██║██╔══██╗██╔══██╗██║╚══██╔══╝██║  ██║
 █████╗  ██║     ███████║██║   ██║██║ █╗ ██║██████╔╝███████║██║   ██║   ███████║
 ██╔══╝  ██║     ██╔══██║██║   ██║██║███╗██║██╔══██╗██╔══██║██║   ██║   ██╔══██║
 ███████╗╚██████╗██║  ██║╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║   ██║   ██║  ██║
 ╚══════╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝
+═══════════════════════════════════════════════════════════════════════════
         """
         self.console.print(Panel(banner, style="cyan"))
-        self.console.print("[yellow]Advanced WiFi Security Analysis Platform[/yellow]")
+        self.console.print("[cyan][ Spectral WiFi Security Framework ][/cyan]")
         self.console.print("[red]For educational purposes and authorized testing only[/red]\n")
 
     def display_menu(self):
