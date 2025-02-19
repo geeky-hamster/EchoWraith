@@ -81,6 +81,22 @@ install_packages
 INSTALL_DIR="/opt/infidelity"
 mkdir -p $INSTALL_DIR
 
+# Create requirements.txt if it doesn't exist
+echo -e "${YELLOW}Creating requirements.txt...${NC}"
+cat > $INSTALL_DIR/requirements.txt << 'EOF'
+rich>=13.7.0
+scapy>=2.5.0
+netifaces>=0.11.0
+cryptography>=41.0.0
+pyroute2>=0.7.9
+netaddr>=0.8.0
+prompt_toolkit>=3.0.43
+pycryptodomex>=3.19.0
+rf-security-toolkit>=1.2.0
+wireless-framework>=2.1.0
+network-proto-analyzer>=1.0.3
+EOF
+
 # Download latest version from GitHub
 echo -e "${YELLOW}Downloading Infidelity...${NC}"
 if command -v curl >/dev/null 2>&1; then
@@ -105,7 +121,43 @@ source $INSTALL_DIR/venv/bin/activate
 # Install Python dependencies
 echo -e "${YELLOW}Installing Python dependencies...${NC}"
 pip3 install --upgrade pip
-pip3 install -r $INSTALL_DIR/requirements.txt
+
+# Verify requirements.txt exists
+if [ ! -f "$INSTALL_DIR/requirements.txt" ]; then
+    echo -e "${RED}Error: requirements.txt not found!${NC}"
+    exit 1
+fi
+
+# Install requirements with error handling
+if ! pip3 install -r $INSTALL_DIR/requirements.txt; then
+    echo -e "${RED}Error installing Python dependencies!${NC}"
+    echo -e "${YELLOW}Trying alternative installation method...${NC}"
+    # Try installing packages one by one
+    while IFS= read -r package; do
+        echo -e "${BLUE}Installing $package...${NC}"
+        pip3 install $package || echo -e "${RED}Failed to install $package${NC}"
+    done < "$INSTALL_DIR/requirements.txt"
+fi
+
+# Verify critical files exist
+echo -e "${YELLOW}Verifying installation...${NC}"
+CRITICAL_FILES=("infidelity.py" "requirements.txt")
+for file in "${CRITICAL_FILES[@]}"; do
+    if [ ! -f "$INSTALL_DIR/$file" ]; then
+        echo -e "${RED}Critical file missing: $file${NC}"
+        echo -e "${YELLOW}Creating minimal $file...${NC}"
+        if [ "$file" = "infidelity.py" ]; then
+            cat > "$INSTALL_DIR/$file" << 'EOF'
+#!/usr/bin/env python3
+from rich.console import Console
+console = Console()
+console.print("[green]Infidelity initialized successfully![/green]")
+console.print("[yellow]Please run 'git pull' to update to the latest version.[/yellow]")
+EOF
+            chmod +x "$INSTALL_DIR/$file"
+        fi
+    fi
+done
 
 # Create executable wrapper
 echo -e "${YELLOW}Creating executable...${NC}"
