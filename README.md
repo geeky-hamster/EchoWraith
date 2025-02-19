@@ -40,14 +40,14 @@ EchoWraith is a sophisticated WiFi security analysis framework that combines spe
 
 ### Quick Install (Recommended)
 ```bash
-curl -sSL https://raw.githubusercontent.com/your-username/echowraith/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/geeky-hamster/EchoWraith/main/install.sh | sudo bash
 ```
 
 ### Manual Installation
 1. Clone the repository:
 ```bash
-git clone https://github.com/your-username/echowraith.git
-cd echowraith
+git clone https://github.com/geeky-hamster/EchoWraith.git
+cd EchoWraith
 ```
 
 2. Install dependencies:
