@@ -34,12 +34,15 @@ class NetworkScanner:
         """Hop through channels 1-14"""
         while self.running:
             try:
+                # Debug output for channel hopping
+                self.console.print(f"[cyan]Switching to channel {self.channel}[/cyan]")
                 subprocess.run(['iwconfig', self.interface, 'channel', str(self.channel)],
                              stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
                 self.channel = self.channel % 14 + 1
                 time.sleep(0.5)
-            except:
+            except Exception as e:
+                self.console.print(f"[red]Error in channel hopping: {str(e)}[/red]")
                 continue
 
     def _packet_handler(self, pkt):
@@ -51,6 +54,9 @@ class NetworkScanner:
                 essid = pkt[Dot11Elt].info.decode()
                 channel = int(ord(pkt[Dot11Elt:3].info))
                 signal = -(256-ord(pkt.notdecoded[-4:-3]))
+                
+                # Debug output for packet capture
+                self.console.print(f"[green]Captured beacon: BSSID={bssid}, ESSID={essid}[/green]")
                 
                 # Get encryption type
                 capability = pkt.sprintf("{Dot11Beacon:%Dot11Beacon.cap%}")
@@ -93,7 +99,8 @@ class NetworkScanner:
                         'clients': set()
                     })
                 
-            except:
+            except Exception as e:
+                self.console.print(f"[red]Error processing packet: {str(e)}[/red]")
                 pass
         
         # Track client connections
@@ -162,7 +169,14 @@ class NetworkScanner:
                 self.console.print("[red]Failed to enable monitor mode![/red]")
                 return
 
+            # Verify monitor mode
+            result = subprocess.run(['iwconfig', self.interface], capture_output=True, text=True)
+            if 'Mode:Monitor' not in result.stdout:
+                self.console.print("[red]Interface is not in monitor mode![/red]")
+                return
+
             self.console.print("[green]Monitor mode enabled successfully![/green]")
+            self.console.print(f"[cyan]Using interface: {self.interface}[/cyan]")
 
             # Start channel hopping
             self.running = True
@@ -190,7 +204,8 @@ class NetworkScanner:
                 start_time = time.time()
                 while time.time() - start_time < self.scan_time:
                     progress.update(task, completed=int(time.time() - start_time))
-                    self.display_networks()
+                    if self.networks:  # Only display if networks found
+                        self.display_networks()
                     time.sleep(1)
                     os.system('cls' if os.name == 'nt' else 'clear')
 
@@ -199,7 +214,11 @@ class NetworkScanner:
 
             # Final network display
             if not self.networks:
-                self.console.print("[yellow]No networks found![/yellow]")
+                self.console.print("[red]No networks found! Please check your wireless adapter.[/red]")
+                self.console.print("[yellow]Troubleshooting tips:[/yellow]")
+                self.console.print("1. Make sure your wireless adapter supports monitor mode")
+                self.console.print("2. Try running 'sudo airmon-ng check kill' to kill interfering processes")
+                self.console.print("3. Verify that your wireless adapter is properly connected")
                 return
 
             self.display_networks()
@@ -228,6 +247,9 @@ class NetworkScanner:
 
         except Exception as e:
             self.console.print(f"[red]Error during scan: {str(e)}[/red]")
+            self.console.print("[yellow]Full error traceback:[/yellow]")
+            import traceback
+            self.console.print(traceback.format_exc())
 
         finally:
             # Cleanup
