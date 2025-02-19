@@ -84,39 +84,72 @@ class Infidelity:
             self.console.print(f"[red]Error in handshake capture: {str(e)}[/red]")
 
     def view_history(self):
-        """View session history from log file"""
+        """View session history and captured data"""
         try:
-            log_file = os.path.join(self.directories['logs'], 'activity.log')
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            data_dir = os.path.join(base_dir, 'data')
             
-            if not os.path.exists(log_file):
-                self.console.print("[yellow]No history found.[/yellow]")
-                return
-
-            with open(log_file, 'r') as f:
-                history = f.readlines()
-
-            if not history:
-                self.console.print("[yellow]History is empty.[/yellow]")
-                return
-
+            # Create a table for history display
             table = Table(title="Session History")
-            table.add_column("Timestamp", style="cyan")
+            table.add_column("Date/Time", style="cyan")
+            table.add_column("Module", style="green")
             table.add_column("Activity", style="yellow")
-
-            for entry in history[-20:]:  # Show last 20 entries
-                try:
-                    timestamp = entry[1:20]
-                    activity = entry[22:].strip()
-                    table.add_row(timestamp, activity)
-                except:
-                    continue
-
-            self.console.print(table)
+            
+            # Read from activity log
+            log_file = os.path.join(data_dir, 'logs', 'activity.log')
+            if os.path.exists(log_file):
+                with open(log_file, 'r') as f:
+                    for line in f:
+                        if line.strip():
+                            try:
+                                # Parse log line
+                                timestamp = line[1:20]  # Extract timestamp
+                                message = line[22:].strip()  # Extract message
+                                
+                                # Determine module from message
+                                module = "Unknown"
+                                if "network scan" in message.lower():
+                                    module = "Network Scanner"
+                                elif "deauth" in message.lower():
+                                    module = "Deauthentication"
+                                elif "wps" in message.lower():
+                                    module = "WPS Analysis"
+                                elif "handshake" in message.lower():
+                                    module = "Handshake Capture"
+                                
+                                table.add_row(timestamp, module, message)
+                            except:
+                                continue
+                
+                self.console.print(table)
+            else:
+                self.console.print("[yellow]No history found.[/yellow]")
+                
+            # Display captured data summary
+            self.console.print("\n[cyan]Captured Data Summary:[/cyan]")
+            
+            # Check handshakes
+            handshake_dir = os.path.join(data_dir, 'handshakes')
+            if os.path.exists(handshake_dir):
+                handshakes = len([f for f in os.listdir(handshake_dir) if f.endswith('.cap')])
+                self.console.print(f"[green]Handshakes captured:[/green] {handshakes}")
+            
+            # Check WPS results
+            wps_dir = os.path.join(data_dir, 'wps')
+            if os.path.exists(wps_dir):
+                wps_results = len([f for f in os.listdir(wps_dir) if f.endswith('.txt')])
+                self.console.print(f"[green]WPS analysis results:[/green] {wps_results}")
+            
+            # Check network scans
+            scans_dir = os.path.join(data_dir, 'scans')
+            if os.path.exists(scans_dir):
+                scans = len([f for f in os.listdir(scans_dir) if f.endswith('.txt')])
+                self.console.print(f"[green]Network scans:[/green] {scans}")
+            
+            input("\nPress Enter to continue...")
             
         except Exception as e:
             self.console.print(f"[red]Error viewing history: {str(e)}[/red]")
-        
-        input("\nPress Enter to continue...")
 
     def exit_program(self):
         self.console.print("[yellow]Cleaning up and exiting...[/yellow]")
@@ -195,11 +228,15 @@ class Infidelity:
 
     def run(self):
         """Main program loop"""
+        if os.geteuid() != 0:
+            self.console.print("[red]Please run Infidelity with root privileges[/red]")
+            sys.exit(1)
+
+        self.display_banner()
+        
         while True:
             try:
-                self.display_banner()
                 self.display_menu()
-                
                 choice = Prompt.ask(
                     "\n[bold cyan]Select a module[/bold cyan]",
                     choices=list(self.modules.keys()),
@@ -209,12 +246,6 @@ class Infidelity:
                 module_name, module_func, _ = self.modules[choice]
                 self.console.print(f"\n[bold green]Running {module_name}...[/bold green]")
                 
-                # Check if root before running security modules
-                if choice in ['1', '2', '3', '4'] and os.geteuid() != 0:
-                    self.console.print("[red]This module requires root privileges. Please run as root.[/red]")
-                    input("\nPress Enter to continue...")
-                    continue
-                
                 module_func()
                 
                 if choice != '8':  # If not exit
@@ -222,9 +253,11 @@ class Infidelity:
                 
             except KeyboardInterrupt:
                 self.console.print("\n[yellow]Operation cancelled by user[/yellow]")
+                log_activity("Operation cancelled by user")
                 continue
             except Exception as e:
                 self.console.print(f"[red]Error: {str(e)}[/red]")
+                log_activity(f"Error occurred: {str(e)}")
                 continue
 
 if __name__ == "__main__":

