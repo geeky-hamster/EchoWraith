@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 
-from scapy.all import *
-from scapy.layers.dot11 import Dot11, Dot11Beacon, Dot11Elt, Dot11WEP
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress
+import subprocess
 import threading
 import time
 import os
-import subprocess
 from datetime import datetime
-from threading import Thread
 from modules.utils import (
     check_wireless_tools,
     get_interface,
     setup_monitor_mode,
     get_data_path,
-    log_activity
+    log_activity,
+    get_temp_path,
+    cleanup_temp_files
 )
 
 class NetworkScanner:
@@ -24,130 +23,107 @@ class NetworkScanner:
         self.console = Console()
         self.interface = None
         self.networks = []
-        self.channel = 1
         self.running = False
-        self.lock = threading.Lock()
-        self.display_thread = None
         self.scan_time = 30  # Default scan time in seconds
 
-    def _channel_hopper(self):
-        """Hop through channels 1-14"""
-        while self.running:
-            try:
-                # Debug output for channel hopping
-                self.console.print(f"[cyan]Switching to channel {self.channel}[/cyan]")
-                subprocess.run(['iwconfig', self.interface, 'channel', str(self.channel)],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
-                self.channel = self.channel % 14 + 1
-                time.sleep(0.5)
-            except Exception as e:
-                self.console.print(f"[red]Error in channel hopping: {str(e)}[/red]")
-                continue
-
-    def _packet_handler(self, pkt):
-        """Handle captured packets"""
-        if pkt.haslayer(Dot11Beacon):
-            try:
-                # Extract basic information
-                bssid = pkt[Dot11].addr2
-                essid = pkt[Dot11Elt].info.decode()
-                channel = int(ord(pkt[Dot11Elt:3].info))
-                signal = -(256-ord(pkt.notdecoded[-4:-3]))
+    def scan_networks(self):
+        """Scan for networks using airodump-ng"""
+        try:
+            networks = []
+            temp_file = get_temp_path(f'scan_{int(time.time())}')
+            
+            # Start airodump-ng scan
+            scan_process = subprocess.Popen(
+                ['airodump-ng', '--output-format', 'csv', '-w', temp_file, self.interface],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            
+            # Show progress while scanning
+            with Progress() as progress:
+                task = progress.add_task("[cyan]Scanning for networks...", total=self.scan_time)
                 
-                # Debug output for packet capture
-                self.console.print(f"[green]Captured beacon: BSSID={bssid}, ESSID={essid}[/green]")
-                
-                # Get encryption type
-                capability = pkt.sprintf("{Dot11Beacon:%Dot11Beacon.cap%}")
-                encryption = "Open"
-                
-                if 'privacy' in capability:
-                    # Check for WEP
-                    if pkt.haslayer(Dot11WEP):
-                        encryption = "WEP"
-                    else:
-                        # Check for WPA/WPA2
-                        for n in range(pkt[Dot11Elt].payload.iterpayloads()):
-                            if n.ID == 48:  # RSN (WPA2) element ID
-                                encryption = "WPA2"
-                                break
-                            elif n.ID == 221 and n.info.startswith(b'\x00P\xf2\x01\x01\x00'):  # WPA element ID
-                                encryption = "WPA"
-                                break
-                
-                # Check if network already found
-                with self.lock:
-                    for network in self.networks:
-                        if network['bssid'] == bssid:
-                            network.update({
-                                'signal': signal,
-                                'last_seen': time.time()
-                            })
-                            return
+                for i in range(self.scan_time):
+                    progress.update(task, advance=1)
                     
-                    # Add new network
-                    self.networks.append({
-                        'essid': essid,
-                        'bssid': bssid,
-                        'channel': channel,
-                        'signal': signal,
-                        'encryption': encryption,
-                        'first_seen': time.time(),
-                        'last_seen': time.time(),
-                        'beacons': 1,
-                        'clients': set()
-                    })
+                    # Parse current results
+                    csv_file = f"{temp_file}-01.csv"
+                    if os.path.exists(csv_file):
+                        try:
+                            with open(csv_file, 'r', encoding='utf-8') as f:
+                                lines = f.readlines()
+                                
+                            # Process networks section
+                            networks.clear()  # Clear previous results
+                            for line in lines[2:]:  # Skip headers
+                                if line.strip() and ',' in line:
+                                    parts = line.strip().split(',')
+                                    if len(parts) >= 14:  # Valid network line
+                                        bssid = parts[0].strip()
+                                        if bssid and ':' in bssid:  # Valid BSSID
+                                            networks.append({
+                                                'bssid': bssid,
+                                                'channel': parts[3].strip(),
+                                                'encryption': parts[5].strip(),
+                                                'essid': parts[13].strip().rstrip('\x00'),
+                                                'signal': parts[8].strip(),
+                                                'clients': set()
+                                            })
+                            
+                            # Process clients section
+                            client_section = False
+                            for line in lines:
+                                if 'Station MAC' in line:
+                                    client_section = True
+                                    continue
+                                if client_section and line.strip() and ',' in line:
+                                    parts = line.strip().split(',')
+                                    if len(parts) >= 6:
+                                        client_mac = parts[0].strip()
+                                        ap_mac = parts[5].strip()
+                                        for network in networks:
+                                            if network['bssid'] == ap_mac:
+                                                network['clients'].add(client_mac)
+                                                
+                            # Display current results
+                            if networks:
+                                self.display_networks(networks)
+                                
+                        except Exception as e:
+                            self.console.print(f"[yellow]Error parsing results: {str(e)}[/yellow]")
+                    
+                    time.sleep(1)
                 
-            except Exception as e:
-                self.console.print(f"[red]Error processing packet: {str(e)}[/red]")
-                pass
-        
-        # Track client connections
-        elif pkt.haslayer(Dot11) and pkt.type == 2:  # Data frames
-            try:
-                ds = pkt.FCfield & 0x3
-                if ds == 1:  # Station to AP
-                    client = pkt.addr2
-                    bssid = pkt.addr1
-                elif ds == 2:  # AP to Station
-                    client = pkt.addr1
-                    bssid = pkt.addr2
-                else:
-                    return
-                
-                # Update network client list
-                with self.lock:
-                    for network in self.networks:
-                        if network['bssid'] == bssid:
-                            network['clients'].add(client)
-                            break
-            except:
-                pass
+            # Cleanup
+            scan_process.terminate()
+            cleanup_temp_files()
+            return networks
+            
+        except Exception as e:
+            self.console.print(f"[red]Error during scan: {str(e)}[/red]")
+            return []
 
-    def display_networks(self):
-        """Display networks with improved formatting"""
+    def display_networks(self, networks):
+        """Display networks in a formatted table"""
         table = Table(title="Discovered Networks")
         table.add_column("BSSID", style="cyan")
+        table.add_column("Channel", justify="center")
         table.add_column("ESSID", style="green")
-        table.add_column("Channel", justify="right")
-        table.add_column("Signal", justify="right")
         table.add_column("Encryption", style="yellow")
-        table.add_column("Clients", justify="right")
+        table.add_column("Signal", justify="right")
+        table.add_column("Clients", justify="center")
 
-        with self.lock:
-            networks = sorted(self.networks, key=lambda x: x['signal'], reverse=True)
-            
-            for network in networks:
-                table.add_row(
-                    network['bssid'],
-                    network['essid'] or "<hidden>",
-                    str(network['channel']),
-                    f"{network['signal']} dBm",
-                    network['encryption'],
-                    str(len(network['clients']))
-                )
+        for network in sorted(networks, key=lambda x: x.get('signal', '0'), reverse=True):
+            table.add_row(
+                network['bssid'],
+                network['channel'],
+                network['essid'] or "<hidden>",
+                network['encryption'],
+                network['signal'],
+                str(len(network['clients']))
+            )
 
+        os.system('cls' if os.name == 'nt' else 'clear')
         self.console.print(table)
 
     def start_scan(self):
@@ -169,59 +145,19 @@ class NetworkScanner:
                 self.console.print("[red]Failed to enable monitor mode![/red]")
                 return
 
-            # Verify monitor mode
-            result = subprocess.run(['iwconfig', self.interface], capture_output=True, text=True)
-            if 'Mode:Monitor' not in result.stdout:
-                self.console.print("[red]Interface is not in monitor mode![/red]")
-                return
-
             self.console.print("[green]Monitor mode enabled successfully![/green]")
             self.console.print(f"[cyan]Using interface: {self.interface}[/cyan]")
 
-            # Start channel hopping
-            self.running = True
-            channel_thread = Thread(target=self._channel_hopper)
-            channel_thread.daemon = True
-            channel_thread.start()
-
             # Start scanning
             self.console.print("\n[yellow]Starting network scan...[/yellow]")
-            self.console.print(f"[cyan]Scanning for {self.scan_time} seconds...[/cyan]")
+            networks = self.scan_networks()
 
-            with Progress() as progress:
-                task = progress.add_task("[cyan]Scanning...", total=self.scan_time)
-
-                # Start packet capture
-                sniff_thread = Thread(target=lambda: sniff(
-                    iface=self.interface,
-                    prn=self._packet_handler,
-                    timeout=self.scan_time
-                ))
-                sniff_thread.daemon = True
-                sniff_thread.start()
-
-                # Show progress and update network display
-                start_time = time.time()
-                while time.time() - start_time < self.scan_time:
-                    progress.update(task, completed=int(time.time() - start_time))
-                    if self.networks:  # Only display if networks found
-                        self.display_networks()
-                    time.sleep(1)
-                    os.system('cls' if os.name == 'nt' else 'clear')
-
-            self.running = False
-            time.sleep(1)  # Wait for threads to clean up
-
-            # Final network display
-            if not self.networks:
-                self.console.print("[red]No networks found! Please check your wireless adapter.[/red]")
-                self.console.print("[yellow]Troubleshooting tips:[/yellow]")
-                self.console.print("1. Make sure your wireless adapter supports monitor mode")
-                self.console.print("2. Try running 'sudo airmon-ng check kill' to kill interfering processes")
-                self.console.print("3. Verify that your wireless adapter is properly connected")
+            if not networks:
+                self.console.print("[yellow]No networks found in range.[/yellow]")
                 return
 
-            self.display_networks()
+            # Display final results
+            self.display_networks(networks)
 
             # Save results
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -232,10 +168,10 @@ class NetworkScanner:
                 f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"Interface: {self.interface}\n")
                 f.write(f"Duration: {self.scan_time} seconds\n\n")
-                f.write("BSSID,ESSID,Channel,Signal,Encryption,Clients\n")
-                for network in sorted(self.networks, key=lambda x: x['signal'], reverse=True):
-                    f.write(f"{network['bssid']},{network['essid']},{network['channel']},"
-                           f"{network['signal']},{network['encryption']},{len(network['clients'])}\n")
+                f.write("BSSID,Channel,ESSID,Encryption,Signal,Clients\n")
+                for network in sorted(networks, key=lambda x: x.get('signal', '0'), reverse=True):
+                    f.write(f"{network['bssid']},{network['channel']},{network['essid']},"
+                           f"{network['encryption']},{network['signal']},{len(network['clients'])}\n")
                     if network['clients']:
                         f.write("Connected clients:\n")
                         for client in network['clients']:
@@ -243,17 +179,13 @@ class NetworkScanner:
                         f.write("\n")
 
             self.console.print(f"\n[green]Scan results saved to: {save_path}[/green]")
-            log_activity(f"Network scan completed - Found {len(self.networks)} networks")
+            log_activity(f"Network scan completed - Found {len(networks)} networks")
 
         except Exception as e:
             self.console.print(f"[red]Error during scan: {str(e)}[/red]")
-            self.console.print("[yellow]Full error traceback:[/yellow]")
-            import traceback
-            self.console.print(traceback.format_exc())
 
         finally:
             # Cleanup
-            self.running = False
             try:
                 subprocess.run(['airmon-ng', 'stop', self.interface],
                              stdout=subprocess.DEVNULL,
