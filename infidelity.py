@@ -21,18 +21,132 @@ class Infidelity:
     def __init__(self):
         self.console = Console()
         self.modules = {
-            '1': ('Network Scanner', self.network_scan, 'Discover and analyze nearby WiFi networks'),
-            '2': ('Deauthentication', self.deauth_attack, 'Disconnect clients from target networks'),
-            '3': ('WPS Analysis', self.wps_attack, 'Test WPS security'),
-            '4': ('Handshake Capture', self.capture_handshake, 'Capture and analyze WPA/WPA2 handshakes'),
-            '5': ('View History', self.view_history, 'View previous session results'),
-            '6': ('System Check', self.system_check, 'Check system requirements'),
+            '1': ('System Check', self.system_check, 'Check system requirements and wireless capabilities'),
+            '2': ('Network Scanner', self.network_scan, 'Discover and analyze nearby WiFi networks'),
+            '3': ('Deauthentication', self.deauth_attack, 'Disconnect clients from target networks'),
+            '4': ('WPS Analysis', self.wps_attack, 'Test WPS security'),
+            '5': ('Handshake Capture', self.capture_handshake, 'Capture and analyze WPA/WPA2 handshakes'),
+            '6': ('View History', self.view_history, 'View previous session results'),
             '7': ('Clean Workspace', self.clean_workspace, 'Delete all created files and directories'),
             '8': ('Exit', self.exit_program, 'Exit Infidelity')
         }
         self.directories = setup_workspace()
         if not self.directories:
             console.print("[red]Failed to setup workspace. Some features may not work correctly.[/red]")
+
+    def perform_system_check(self):
+        """Perform comprehensive system check"""
+        try:
+            self.console.print("\n[cyan]Performing system check...[/cyan]")
+            checks_passed = True
+            
+            # Check Python version
+            python_version = sys.version_info
+            if python_version.major < 3 or (python_version.major == 3 and python_version.minor < 6):
+                self.console.print("[red]❌ Error: Python 3.6 or higher is required[/red]")
+                checks_passed = False
+            else:
+                self.console.print("[green]✓ Python version: OK[/green]")
+            
+            # Check root privileges
+            if os.geteuid() != 0:
+                self.console.print("[red]❌ Error: Root privileges required[/red]")
+                checks_passed = False
+            else:
+                self.console.print("[green]✓ Root privileges: OK[/green]")
+            
+            # Check required tools
+            tools = {
+                'aircrack-ng': 'Aircrack-ng suite',
+                'iwconfig': 'Wireless tools',
+                'reaver': 'Reaver WPS tool',
+                'wash': 'WPS scanning tool'
+            }
+            
+            for tool, description in tools.items():
+                if subprocess.run(['which', tool], stdout=subprocess.DEVNULL).returncode == 0:
+                    self.console.print(f"[green]✓ {description} ({tool}): OK[/green]")
+                else:
+                    self.console.print(f"[red]❌ {description} ({tool}): Not found[/red]")
+                    checks_passed = False
+            
+            # Check wireless interfaces
+            interfaces = []
+            result = subprocess.run(['iwconfig'], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'IEEE 802.11' in line:
+                        iface = line.split()[0]
+                        interfaces.append(iface)
+                        
+                        # Check interface capabilities
+                        self.console.print(f"\n[cyan]Checking capabilities for {iface}:[/cyan]")
+                        
+                        # Check monitor mode support
+                        monitor_support = False
+                        iw_info = subprocess.run(['iwconfig', iface], capture_output=True, text=True)
+                        if 'Mode:Monitor' in iw_info.stdout or 'Mode:Auto' in iw_info.stdout:
+                            monitor_support = True
+                        
+                        if monitor_support:
+                            self.console.print(f"[green]✓ {iface} supports monitor mode[/green]")
+                        else:
+                            self.console.print(f"[yellow]⚠ {iface} monitor mode support unclear[/yellow]")
+                        
+                        # Check supported bands and channels
+                        try:
+                            iw_info = subprocess.run(['iwlist', iface, 'frequency'], capture_output=True, text=True)
+                            if '2.4 GHz' in iw_info.stdout:
+                                self.console.print(f"[green]✓ {iface} supports 2.4 GHz band[/green]")
+                            if '5.0 GHz' in iw_info.stdout:
+                                self.console.print(f"[green]✓ {iface} supports 5 GHz band[/green]")
+                        except:
+                            self.console.print(f"[yellow]⚠ Could not determine frequency bands for {iface}[/yellow]")
+                        
+                        # Check TX power capabilities
+                        try:
+                            iw_info = subprocess.run(['iwlist', iface, 'txpower'], capture_output=True, text=True)
+                            if 'Current Tx-Power' in iw_info.stdout:
+                                self.console.print(f"[green]✓ {iface} supports TX power adjustment[/green]")
+                        except:
+                            self.console.print(f"[yellow]⚠ Could not determine TX power capabilities for {iface}[/yellow]")
+                
+                if interfaces:
+                    self.console.print(f"\n[green]✓ Found {len(interfaces)} wireless interface(s)[/green]")
+                else:
+                    self.console.print("[red]❌ No wireless interfaces found![/red]")
+                    self.console.print("[yellow]Please connect a compatible wireless adapter[/yellow]")
+                    checks_passed = False
+            else:
+                self.console.print("[red]❌ Error checking wireless interfaces[/red]")
+                checks_passed = False
+            
+            # Check workspace directories
+            if self.directories:
+                self.console.print("[green]✓ Workspace directories: OK[/green]")
+            else:
+                self.console.print("[red]❌ Error with workspace directories[/red]")
+                checks_passed = False
+            
+            # Final verdict
+            if checks_passed:
+                self.console.print("\n[green]✓ All system checks passed! System is ready.[/green]")
+                log_activity("System check completed - All checks passed")
+                return True
+            else:
+                self.console.print("\n[red]❌ Some system checks failed. Please address the issues above.[/red]")
+                log_activity("System check completed - Some checks failed")
+                return False
+                
+        except Exception as e:
+            self.console.print(f"[red]Error during system check: {str(e)}[/red]")
+            return False
+
+    def system_check(self):
+        """Menu option for system check"""
+        self.perform_system_check()
+        input("\nPress Enter to continue...")
 
     def clean_workspace(self):
         """Clean up all created files"""
@@ -206,46 +320,6 @@ class Infidelity:
 
         self.console.print(table)
 
-    def system_check(self):
-        """Check system requirements and dependencies"""
-        try:
-            self.console.print("\n[cyan]Checking system requirements...[/cyan]")
-            
-            # Check Python version
-            python_version = sys.version_info
-            if python_version.major < 3 or (python_version.major == 3 and python_version.minor < 6):
-                self.console.print("[red]Error: Python 3.6 or higher is required[/red]")
-                return False
-            self.console.print("[green]Python version: OK[/green]")
-            
-            # Check for root privileges
-            if os.geteuid() != 0:
-                self.console.print("[red]Error: Root privileges required[/red]")
-                return False
-            self.console.print("[green]Root privileges: OK[/green]")
-            
-            # Check wireless interfaces
-            interfaces = []
-            result = subprocess.run(['iwconfig'], capture_output=True, text=True)
-            for line in result.stdout.split('\n'):
-                if 'IEEE 802.11' in line:
-                    iface = line.split()[0]
-                    interfaces.append(iface)
-                    self.console.print(f"[green]Found wireless interface: {iface}[/green]")
-            
-            if not interfaces:
-                self.console.print("[red]No wireless interfaces found![/red]")
-                self.console.print("[yellow]Please connect a compatible wireless adapter[/yellow]")
-            else:
-                self.console.print(f"[green]Found {len(interfaces)} wireless interface(s)[/green]")
-            
-            log_activity("System check completed")
-            
-        except Exception as e:
-            self.console.print(f"[red]Error during system check: {str(e)}[/red]")
-        
-        input("\nPress Enter to continue...")
-
     def run(self):
         """Main program loop"""
         if os.geteuid() != 0:
@@ -253,6 +327,11 @@ class Infidelity:
             sys.exit(1)
 
         self.display_banner()
+        
+        # Perform mandatory system check at startup
+        if not self.perform_system_check():
+            self.console.print("\n[red]Critical system requirements not met. Please fix the issues and try again.[/red]")
+            sys.exit(1)
         
         while True:
             try:
