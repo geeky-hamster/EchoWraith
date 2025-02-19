@@ -13,7 +13,7 @@ from modules.network_scanner import NetworkScanner
 from modules.deauth_attack import DeauthAttacker
 from modules.wps_attack import WPSAttacker
 from modules.handshake_capture import HandshakeCapture
-from modules.utils import setup_workspace, cleanup_workspace, log_activity
+from modules.utils import setup_workspace, cleanup_workspace, log_activity, check_wireless_tools
 
 console = Console()
 
@@ -52,15 +52,25 @@ class Infidelity:
         input("\nPress Enter to continue...")
 
     def network_scan(self):
+        """Start network scanning"""
         try:
+            # Check wireless tools first
+            if not check_wireless_tools():
+                return
+
             scanner = NetworkScanner()
             scanner.start_scan()
-            log_activity("Completed network scan")
+            log_activity("Network scan completed")
         except Exception as e:
             self.console.print(f"[red]Error in network scanner: {str(e)}[/red]")
 
     def deauth_attack(self):
+        """Start deauthentication attack"""
         try:
+            # Check wireless tools first
+            if not check_wireless_tools():
+                return
+
             deauther = DeauthAttacker()
             deauther.start_attack()
             log_activity(f"Deauth attack completed - Target: {deauther.target_bssid if deauther.target_bssid else 'Unknown'}")
@@ -68,7 +78,12 @@ class Infidelity:
             self.console.print(f"[red]Error in deauth attack: {str(e)}[/red]")
 
     def wps_attack(self):
+        """Start WPS security analysis"""
         try:
+            # Check wireless tools first
+            if not check_wireless_tools():
+                return
+
             wps = WPSAttacker()
             wps.start_attack()
             log_activity(f"WPS attack completed - Target: {wps.target_bssid if wps.target_bssid else 'Unknown'}")
@@ -76,7 +91,12 @@ class Infidelity:
             self.console.print(f"[red]Error in WPS attack: {str(e)}[/red]")
 
     def capture_handshake(self):
+        """Start handshake capture"""
         try:
+            # Check wireless tools first
+            if not check_wireless_tools():
+                return
+
             handshake = HandshakeCapture()
             handshake.start_capture()
             log_activity(f"Handshake capture completed - Target: {handshake.target_essid if handshake.target_essid else 'Unknown'}")
