@@ -154,9 +154,89 @@ Infidelity is designed for authorized security testing and research purposes onl
 - Root privileges
 - Monitor mode capable wireless adapter
 
+## Installation Methods
+
+### Universal Linux Install (Recommended)
+You can install Infidelity on any Linux distribution using our universal installer:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/geeky-hamster/Infidelity/main/install.sh | sudo bash
+```
+
+The universal installer supports:
+- Debian/Ubuntu (apt)
+- Fedora (dnf)
+- RHEL/CentOS (yum)
+- Arch Linux (pacman)
+- OpenSUSE (zypper)
+
+The installer will:
+- Detect your Linux distribution and package manager
+- Install required system dependencies
+- Create a Python virtual environment
+- Install Python packages
+- Set up system-wide executable
+- Configure workspace directories
+- Set appropriate permissions
+
+### Manual Installation
+For manual installation:
+
+1. Clone the repository:
+```bash
+git clone https://github.com/geeky-hamster/Infidelity.git
+cd Infidelity
+```
+
+2. Install dependencies (example for Debian/Ubuntu):
+```bash
+# For Debian/Ubuntu
+sudo apt-get update
+sudo apt-get install -y python3-pip python3-venv aircrack-ng reaver
+
+# For Fedora
+sudo dnf install -y python3 python3-pip python3-virtualenv aircrack-ng reaver
+
+# For Arch Linux
+sudo pacman -S python python-pip python-virtualenv aircrack-ng reaver
+
+# For OpenSUSE
+sudo zypper install -y python3 python3-pip python3-virtualenv aircrack-ng reaver
+```
+
+3. Create and activate virtual environment:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+4. Install Python packages:
+```bash
+pip3 install --upgrade pip
+pip3 install -r requirements.txt
+```
+
+5. Run Infidelity:
+```bash
+sudo python3 infidelity.py
+```
+
+## Repository
+
+The official repository for Infidelity is maintained at:
+[https://github.com/geeky-hamster/Infidelity.git](https://github.com/geeky-hamster/Infidelity.git)
+
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting pull requests.
+We welcome contributions! Please follow these steps:
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+For more details, see our [Contributing Guidelines](CONTRIBUTING.md).
 
 ## License
 
