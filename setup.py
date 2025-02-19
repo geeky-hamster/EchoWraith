@@ -7,14 +7,14 @@ with open("VERSION", "r", encoding="utf-8") as fh:
     version = fh.read().strip()
 
 setup(
-    name="infidelity",
+    name="echowraith",
     version=version,
     author="Your Name",
     author_email="your.email@example.com",
     description="Advanced WiFi Security Analysis Platform",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/infidelity",
+    url="https://github.com/yourusername/echowraith",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 5 - Production/Stable",
@@ -47,7 +47,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "infidelity=infidelity.main:main",
+            "echowraith=echowraith.main:main",
         ],
     },
     include_package_data=True,

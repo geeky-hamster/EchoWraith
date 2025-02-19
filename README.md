@@ -1,19 +1,19 @@
-# 🎯 INFIDELITY
+# 🌊 ECHOWRAITH
 
 <div align="center">
 
 ```
-════════════════════════════════════════════════════════════════════════
-██╗███╗   ██╗███████╗██╗██████╗ ███████╗██╗     ██╗████████╗██╗   ██╗
-██║████╗  ██║██╔════╝██║██╔══██╗██╔════╝██║     ██║╚══██╔══╝╚██╗ ██╔╝
-██║██╔██╗ ██║█████╗  ██║██║  ██║█████╗  ██║     ██║   ██║    ╚████╔╝ 
-██║██║╚██╗██║██╔══╝  ██║██║  ██║██╔══╝  ██║     ██║   ██║     ╚██╔╝  
-██║██║ ╚████║██║     ██║██████╔╝███████╗███████╗██║   ██║      ██║   
-╚═╝╚═╝  ╚═══╝╚═╝     ╚═╝╚═════╝ ╚══════╝╚══════╝╚═╝   ╚═╝      ╚═╝   
-════════════════════════════════════════════════════════════════════════
+═══════════════════════════════════════════════════════════════════════════
+███████╗ ██████╗██╗  ██╗ ██████╗ ██╗    ██╗██████╗  █████╗ ██╗████████╗██╗  ██╗
+██╔════╝██╔════╝██║  ██║██╔═══██╗██║    ██║██╔══██╗██╔══██╗██║╚══██╔══╝██║  ██║
+█████╗  ██║     ███████║██║   ██║██║ █╗ ██║██████╔╝███████║██║   ██║   ███████║
+██╔══╝  ██║     ██╔══██║██║   ██║██║███╗██║██╔══██╗██╔══██║██║   ██║   ██╔══██║
+███████╗╚██████╗██║  ██║╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║   ██║   ██║  ██║
+╚══════╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝
+═══════════════════════════════════════════════════════════════════════════
 ```
 
-**[ WiFi Security Testing Framework ]**
+**[ Spectral WiFi Security Framework ]**
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/)
@@ -21,33 +21,33 @@
 
 </div>
 
-> 🔥 Your Ultimate WiFi Security Testing Arsenal
+> 🌊 Where Wireless Security Meets Spectral Analysis
 
 ## 🚀 Overview
 
-Infidelity is a powerful WiFi security analysis toolkit designed for network administrators and security professionals. With its sleek interface and comprehensive feature set, it makes testing your network security both effective and enjoyable.
+EchoWraith is a sophisticated WiFi security analysis framework that combines spectral analysis with advanced security testing capabilities. Like a wraith in the electromagnetic spectrum, it silently monitors and analyzes wireless networks with unprecedented precision.
 
 ## ⚡ Features
 
-- 🔍 **Network Scanner**: Discover and analyze nearby networks
-- 💣 **Deauthentication**: Advanced client management
-- 🔑 **WPS Analysis**: Test WPS security implementations
-- 🎯 **Handshake Capture**: Grab and analyze handshakes
-- 📊 **History Tracking**: Monitor all your testing activities
-- 🧰 **System Check**: Verify tool compatibility and requirements
+- 🌊 **Network Scanner**: Discover networks through the ethereal waves
+- 👻 **Deauthentication**: Strike like a phantom in the wireless realm
+- 🔮 **WPS Analysis**: Peer into the mystical gates of WPS security
+- ⚔️ **Handshake Capture**: Capture ethereal handshakes from the spectral plane
+- 📡 **System Check**: Guard your realm with spectral verification
+- 🛡️ **History Viewer**: Chronicle your journey through the wireless dimension
 
 ## 🛠️ Installation
 
 ### Quick Install (Recommended)
 ```bash
-curl -sSL https://raw.githubusercontent.com/your-username/infidelity/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/your-username/echowraith/main/install.sh | sudo bash
 ```
 
 ### Manual Installation
 1. Clone the repository:
 ```bash
-git clone https://github.com/your-username/infidelity.git
-cd infidelity
+git clone https://github.com/your-username/echowraith.git
+cd echowraith
 ```
 
 2. Install dependencies:
@@ -59,15 +59,15 @@ sudo pip3 install -r requirements.txt
 
 3. Make it executable:
 ```bash
-sudo chmod +x infidelity.py
-sudo ln -s $(pwd)/infidelity.py /usr/local/bin/infidelity
+sudo chmod +x echowraith.py
+sudo ln -s $(pwd)/echowraith.py /usr/local/bin/echowraith
 ```
 
 ## 🎮 Usage
 
-1. Start Infidelity:
+1. Start EchoWraith:
 ```bash
-sudo infidelity
+sudo echowraith
 ```
 
 2. Select a module:
@@ -76,7 +76,7 @@ sudo infidelity
 - `3` - Deauthentication
 - `4` - WPS Analysis
 - `5` - Handshake Capture
-- `6` - View History
+- `6` - History Viewer
 - `7` - Clean Workspace
 
 ## 🎯 Requirements
@@ -88,14 +88,14 @@ sudo infidelity
 
 ## 🛡️ Disclaimer
 
-This tool is designed for authorized security testing only. Always obtain proper permission before testing any networks you don't own.
+This framework is designed for authorized security testing only. Always obtain proper permission before testing any networks you don't own.
 
 ## 🤝 Contributing
 
 Contributions are welcome! Feel free to:
-- 🐛 Report bugs
-- 💡 Suggest features
-- 🔧 Submit pull requests
+- 🌊 Report anomalies
+- 💫 Suggest enhancements
+- ⚡ Submit improvements
 
 ## 📜 License
 
@@ -103,7 +103,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🌟 Credits
 
-Created with ❤️
+Created with 🌊 by the EchoWraith Team
 
 ---
-*Remember: With great power comes great responsibility. Use wisely!* 🦸‍♂️ 
+*"In the realm of wireless, we are the silent guardians."* 👻 

@@ -8,7 +8,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Installation directory
-INSTALL_DIR="/opt/infidelity"
+INSTALL_DIR="/opt/echowraith"
 VENV_DIR="$INSTALL_DIR/venv"
 
 # Banner
@@ -67,14 +67,14 @@ mkdir -p "$INSTALL_DIR/modules"
 mkdir -p "$INSTALL_DIR/data"
 
 # Download and extract files
-echo -e "${YELLOW}Downloading Infidelity...${NC}"
-curl -L https://github.com/geeky-hamster/Infidelity/archive/main.tar.gz -o /tmp/infidelity.tar.gz
-tar xzf /tmp/infidelity.tar.gz -C /tmp/
+echo -e "${YELLOW}Downloading EchoWraith...${NC}"
+curl -L https://github.com/geeky-hamster/EchoWraith/archive/main.tar.gz -o /tmp/echowraith.tar.gz
+tar xzf /tmp/echowraith.tar.gz -C /tmp/
 
 # Copy files to installation directory
 echo -e "${YELLOW}Installing files...${NC}"
-cp -r /tmp/Infidelity-main/* "$INSTALL_DIR/"
-cp -r /tmp/Infidelity-main/modules/* "$INSTALL_DIR/modules/"
+cp -r /tmp/EchoWraith-main/* "$INSTALL_DIR/"
+cp -r /tmp/EchoWraith-main/modules/* "$INSTALL_DIR/modules/"
 
 # Create Python virtual environment
 echo -e "${YELLOW}Setting up Python virtual environment...${NC}"
@@ -88,21 +88,21 @@ echo -e "${YELLOW}Installing Python dependencies...${NC}"
 
 # Create executable
 echo -e "${YELLOW}Creating executable...${NC}"
-cat > /usr/local/bin/infidelity << 'EOF'
+cat > /usr/local/bin/echowraith << 'EOF'
 #!/bin/bash
 if [ "$EUID" -ne 0 ]; then
     echo "Please run as root"
     exit 1
 fi
-source /opt/infidelity/venv/bin/activate
-python3 /opt/infidelity/infidelity.py "$@"
+source /opt/echowraith/venv/bin/activate
+python3 /opt/echowraith/echowraith.py "$@"
 EOF
 
-chmod +x /usr/local/bin/infidelity
+chmod +x /usr/local/bin/echowraith
 
 # Clean up
 echo -e "${YELLOW}Cleaning up...${NC}"
-rm -rf /tmp/infidelity.tar.gz /tmp/Infidelity-main
+rm -rf /tmp/echowraith.tar.gz /tmp/EchoWraith-main
 
 # Create data directories
 echo -e "${YELLOW}Creating data directories...${NC}"
@@ -110,6 +110,6 @@ mkdir -p "$INSTALL_DIR/data/"{handshakes,passwords,logs,scans,wps,deauth,temp,co
 chmod -R 755 "$INSTALL_DIR"
 
 echo -e "${GREEN}Installation complete!${NC}"
-echo -e "${YELLOW}You can now run Infidelity by typing: ${GREEN}sudo infidelity${NC}"
+echo -e "${YELLOW}You can now run EchoWraith by typing: ${GREEN}sudo echowraith${NC}"
 echo -e "${BLUE}Installation directory: ${GREEN}$INSTALL_DIR${NC}"
 echo -e "${YELLOW}Note: Make sure your wireless adapter supports monitor mode${NC}" 

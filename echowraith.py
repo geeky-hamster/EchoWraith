@@ -17,7 +17,7 @@ from modules.utils import setup_workspace, cleanup_workspace, log_activity, chec
 
 console = Console()
 
-class Infidelity:
+class EchoWraith:
     def __init__(self):
         self.console = Console()
         self.modules = {
@@ -28,7 +28,7 @@ class Infidelity:
             '5': ('Handshake Capture', self.capture_handshake, 'Capture and analyze WPA/WPA2 handshakes'),
             '6': ('View History', self.view_history, 'View previous session results'),
             '7': ('Clean Workspace', self.clean_workspace, 'Delete all created files and directories'),
-            '8': ('Exit', self.exit_program, 'Exit Infidelity')
+            '8': ('Exit', self.exit_program, 'Exit EchoWraith')
         }
         self.directories = setup_workspace()
         if not self.directories:
@@ -323,7 +323,7 @@ class Infidelity:
     def run(self):
         """Main program loop"""
         if os.geteuid() != 0:
-            self.console.print("[red]Please run Infidelity with root privileges[/red]")
+            self.console.print("[red]Please run EchoWraith with root privileges[/red]")
             sys.exit(1)
 
         self.display_banner()
@@ -361,7 +361,7 @@ class Infidelity:
 
 if __name__ == "__main__":
     try:
-        toolkit = Infidelity()
+        toolkit = EchoWraith()
         toolkit.run()
     except KeyboardInterrupt:
         console.print("\n[yellow]Exiting WiFi Toolkit...[/yellow]")
