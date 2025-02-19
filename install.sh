@@ -80,6 +80,255 @@ install_packages
 # Create installation directory
 INSTALL_DIR="/opt/infidelity"
 mkdir -p $INSTALL_DIR
+mkdir -p $INSTALL_DIR/modules
+
+# Create main application file
+echo -e "${YELLOW}Creating main application file...${NC}"
+cat > $INSTALL_DIR/infidelity.py << 'EOF'
+#!/usr/bin/env python3
+
+from rich.console import Console
+from rich.table import Table
+import os
+import sys
+from modules.network_scanner import NetworkScanner
+from modules.handshake_capture import HandshakeCapture
+from modules.wps_attack import WPSAttacker
+from modules.deauth_attack import DeauthAttacker
+from modules.utils import setup_workspace, cleanup_workspace, log_activity
+
+class Infidelity:
+    def __init__(self):
+        self.console = Console()
+        self.setup_workspace()
+
+    def setup_workspace(self):
+        """Initialize workspace directories"""
+        if not setup_workspace():
+            self.console.print("[red]Failed to setup workspace. Please check permissions.[/red]")
+            sys.exit(1)
+
+    def display_banner(self):
+        """Display the application banner"""
+        banner = """
+██╗███╗   ██╗███████╗██╗██████╗ ███████╗██╗     ██╗████████╗██╗   ██╗
+██║████╗  ██║██╔════╝██║██╔══██╗██╔════╝██║     ██║╚══██╔══╝╚██╗ ██╔╝
+██║██╔██╗ ██║█████╗  ██║██║  ██║█████╗  ██║     ██║   ██║    ╚████╔╝ 
+██║██║╚██╗██║██╔══╝  ██║██║  ██║██╔══╝  ██║     ██║   ██║     ╚██╔╝  
+██║██║ ╚████║██║     ██║██████╔╝███████╗███████╗██║   ██║      ██║   
+╚═╝╚═╝  ╚═══╝╚═╝     ╚═╝╚═════╝ ╚══════╝╚══════╝╚═╝   ╚═╝      ╚═╝   
+        """
+        self.console.print(f"[green]{banner}[/green]")
+        self.console.print("\n[cyan]Advanced WiFi Security Analysis Platform[/cyan]")
+        self.console.print("[yellow]Version 2.1.0[/yellow]\n")
+
+    def display_menu(self):
+        """Display the main menu"""
+        table = Table(title="Available Modules")
+        table.add_column("Option", style="cyan", justify="right")
+        table.add_column("Module", style="green")
+        table.add_column("Description", style="yellow")
+
+        table.add_row("1", "Network Scanner", "Discover and analyze nearby networks")
+        table.add_row("2", "Deauthentication", "Advanced client management")
+        table.add_row("3", "WPS Analysis", "Test WPS security implementations")
+        table.add_row("4", "Handshake Capture", "Capture and analyze handshakes")
+        table.add_row("5", "View History", "View previous session data")
+        table.add_row("6", "Clean Workspace", "Remove temporary files")
+        table.add_row("7", "Exit", "Exit Infidelity")
+
+        self.console.print(table)
+
+    def run(self):
+        """Main application loop"""
+        if os.geteuid() != 0:
+            self.console.print("[red]Please run Infidelity with root privileges[/red]")
+            sys.exit(1)
+
+        self.display_banner()
+        
+        while True:
+            try:
+                self.display_menu()
+                choice = input("\nSelect an option: ")
+
+                if choice == "1":
+                    scanner = NetworkScanner()
+                    scanner.start_scan()
+                elif choice == "2":
+                    deauth = DeauthAttacker()
+                    deauth.start_attack()
+                elif choice == "3":
+                    wps = WPSAttacker()
+                    wps.start_attack()
+                elif choice == "4":
+                    handshake = HandshakeCapture()
+                    handshake.start_capture()
+                elif choice == "5":
+                    self.view_history()
+                elif choice == "6":
+                    cleanup_workspace()
+                    self.console.print("[green]Workspace cleaned successfully![/green]")
+                elif choice == "7":
+                    self.console.print("[yellow]Exiting Infidelity...[/yellow]")
+                    break
+                else:
+                    self.console.print("[red]Invalid option. Please try again.[/red]")
+
+            except KeyboardInterrupt:
+                self.console.print("\n[yellow]Operation cancelled by user[/yellow]")
+            except Exception as e:
+                self.console.print(f"[red]Error: {str(e)}[/red]")
+
+    def view_history(self):
+        """View session history and captured data"""
+        # Implementation for viewing history
+        pass
+
+if __name__ == "__main__":
+    app = Infidelity()
+    app.run()
+EOF
+
+# Create modules directory and files
+echo -e "${YELLOW}Creating module files...${NC}"
+
+# Create __init__.py for modules directory
+touch $INSTALL_DIR/modules/__init__.py
+
+# Create network_scanner.py
+cat > $INSTALL_DIR/modules/network_scanner.py << 'EOF'
+#!/usr/bin/env python3
+
+from rich.console import Console
+from rich.table import Table
+import subprocess
+import os
+
+class NetworkScanner:
+    def __init__(self):
+        self.console = Console()
+
+    def start_scan(self):
+        self.console.print("[cyan]Starting network scan...[/cyan]")
+        self.console.print("[yellow]This feature will be implemented in the next update.[/yellow]")
+EOF
+
+# Create handshake_capture.py
+cat > $INSTALL_DIR/modules/handshake_capture.py << 'EOF'
+#!/usr/bin/env python3
+
+from rich.console import Console
+
+class HandshakeCapture:
+    def __init__(self):
+        self.console = Console()
+
+    def start_capture(self):
+        self.console.print("[cyan]Starting handshake capture...[/cyan]")
+        self.console.print("[yellow]This feature will be implemented in the next update.[/yellow]")
+EOF
+
+# Create wps_attack.py
+cat > $INSTALL_DIR/modules/wps_attack.py << 'EOF'
+#!/usr/bin/env python3
+
+from rich.console import Console
+
+class WPSAttacker:
+    def __init__(self):
+        self.console = Console()
+
+    def start_attack(self):
+        self.console.print("[cyan]Starting WPS analysis...[/cyan]")
+        self.console.print("[yellow]This feature will be implemented in the next update.[/yellow]")
+EOF
+
+# Create deauth_attack.py
+cat > $INSTALL_DIR/modules/deauth_attack.py << 'EOF'
+#!/usr/bin/env python3
+
+from rich.console import Console
+
+class DeauthAttacker:
+    def __init__(self):
+        self.console = Console()
+
+    def start_attack(self):
+        self.console.print("[cyan]Starting deauthentication...[/cyan]")
+        self.console.print("[yellow]This feature will be implemented in the next update.[/yellow]")
+EOF
+
+# Make all module files executable
+chmod +x $INSTALL_DIR/modules/*.py
+
+# Create utils.py
+cat > $INSTALL_DIR/modules/utils.py << 'EOF'
+#!/usr/bin/env python3
+
+from rich.console import Console
+import os
+import shutil
+from datetime import datetime
+
+console = Console()
+
+def setup_workspace():
+    """Setup workspace directories"""
+    try:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = os.path.join(base_dir, 'data')
+        
+        directories = {
+            'handshakes': os.path.join(data_dir, 'handshakes'),
+            'passwords': os.path.join(data_dir, 'passwords'),
+            'logs': os.path.join(data_dir, 'logs'),
+            'scans': os.path.join(data_dir, 'scans'),
+            'wps': os.path.join(data_dir, 'wps'),
+            'deauth': os.path.join(data_dir, 'deauth'),
+            'temp': os.path.join(data_dir, 'temp'),
+            'configs': os.path.join(data_dir, 'configs')
+        }
+        
+        for dir_path in directories.values():
+            os.makedirs(dir_path, exist_ok=True)
+            
+        return directories
+    except Exception as e:
+        console.print(f"[red]Error setting up workspace: {str(e)}[/red]")
+        return None
+
+def cleanup_workspace(keep_logs=False):
+    """Clean up workspace files"""
+    try:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = os.path.join(base_dir, 'data')
+        
+        if os.path.exists(data_dir):
+            for subdir in ['handshakes', 'passwords', 'scans', 'wps', 'temp']:
+                dir_path = os.path.join(data_dir, subdir)
+                if os.path.exists(dir_path):
+                    shutil.rmtree(dir_path)
+                    os.makedirs(dir_path)
+            
+        console.print("[green]Workspace cleaned successfully![/green]")
+    except Exception as e:
+        console.print(f"[red]Error cleaning workspace: {str(e)}[/red]")
+
+def log_activity(message):
+    """Log activity with timestamp"""
+    try:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        log_file = os.path.join(base_dir, 'data', 'logs', 'activity.log')
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_file, 'a') as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except Exception as e:
+        console.print(f"[red]Error logging activity: {str(e)}[/red]")
+EOF
+
+chmod +x $INSTALL_DIR/infidelity.py
+chmod +x $INSTALL_DIR/modules/utils.py
 
 # Create requirements.txt if it doesn't exist
 echo -e "${YELLOW}Creating requirements.txt...${NC}"
