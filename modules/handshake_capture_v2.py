@@ -620,77 +620,66 @@ class HandshakeCaptureV2:
                     universal_newlines=True
                 )
                 
-                try:
-                    while process.poll() is None:
-                        line = process.stdout.readline()
-                        if not line:
-                            continue
-                            
-                        if "KEY FOUND!" in line:
-                            with open(password_file, 'r') as f:
-                                password = f.read().strip()
-                                self.console.print(f"\n\n[green]Password found: {password}[/green]")
-                                
-                                # Save detailed results
-                                results_file = os.path.join(self.data_path['passwords'], f'details_{self.target_bssid.replace(":", "")}.txt')
-                                with open(results_file, 'w') as rf:
-                                    rf.write(f"Network: {self.target_essid}\n")
-                                    rf.write(f"BSSID: {self.target_bssid}\n")
-                                    rf.write(f"Channel: {self.target_channel}\n")
-                                    rf.write(f"Password: {password}\n")
-                                    rf.write(f"Wordlist: {wordlist}\n")
-                                    rf.write(f"Capture File: {capfile}\n")
-                                    rf.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                                
-                                return True
-                                
-                        elif "Tested" in line:
-                            try:
-                                # Extract progress information
-                                tested = int(line.split('(')[1].split(' ')[0])
-                                current_time = time.time()
-                                
-                                # Update progress every second
-                                if current_time - last_update >= 1:
-                                    # Calculate speed and progress
-                                    speed = (tested - tested_keys) / (current_time - last_update)
-                                    progress = (tested / total_passwords) * 100
-                                    
-                                    # Calculate estimated time remaining
-                                    remaining_keys = total_passwords - tested
-                                    time_remaining = remaining_keys / speed if speed > 0 else 0
-                                    hours = int(time_remaining / 3600)
-                                    minutes = int((time_remaining % 3600) / 60)
-                                    seconds = int(time_remaining % 60)
-                                    
-                                    # Create progress bar
-                                    bar_width = 50
-                                    filled = int(bar_width * progress / 100)
-                                    bar = '█' * filled + '░' * (bar_width - filled)
-                                    
-                                    # Clear line and update progress
-                                    print(f"\r\033[K", end='')  # Clear the current line
-                                    print(
-                                        f"\r[*] Progress: |{bar}| {progress:.1f}% "
-                                        f"({tested:,}/{total_passwords:,} keys) "
-                                        f"[Speed: {speed:,.0f} keys/s] "
-                                        f"[ETA: {hours:02d}:{minutes:02d}:{seconds:02d}]",
-                                        end=''
-                                    )
-                                    
-                                    tested_keys = tested
-                                    last_update = current_time
-                                    
-                            except Exception as e:
-                                # Fallback to simple progress display
-                                print(f"\r\033[K{line.strip()}", end='')
+                with Progress() as progress:
+                    task = progress.add_task("[cyan]Cracking password...", total=total_passwords)
                     
-                    print("\n")  # Add newline after progress bar completes
+                    try:
+                        while process.poll() is None:
+                            line = process.stdout.readline()
+                            if not line:
+                                continue
+                                
+                            if "KEY FOUND!" in line:
+                                with open(password_file, 'r') as f:
+                                    password = f.read().strip()
+                                    self.console.print(f"\n\n[green]Password found: {password}[/green]")
+                                    
+                                    # Save detailed results
+                                    results_file = os.path.join(self.data_path['passwords'], f'details_{self.target_bssid.replace(":", "")}.txt')
+                                    with open(results_file, 'w') as rf:
+                                        rf.write(f"Network: {self.target_essid}\n")
+                                        rf.write(f"BSSID: {self.target_bssid}\n")
+                                        rf.write(f"Channel: {self.target_channel}\n")
+                                        rf.write(f"Password: {password}\n")
+                                        rf.write(f"Wordlist: {wordlist}\n")
+                                        rf.write(f"Capture File: {capfile}\n")
+                                        rf.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                                    
+                                    return True
+                                    
+                            elif "Tested" in line:
+                                try:
+                                    # Extract progress information
+                                    tested = int(line.split('(')[1].split(' ')[0])
+                                    current_time = time.time()
+                                    
+                                    # Update progress every second
+                                    if current_time - last_update >= 1:
+                                        # Calculate speed and progress
+                                        speed = (tested - tested_keys) / (current_time - last_update)
+                                        progress_percent = (tested / total_passwords) * 100
+                                        
+                                        # Calculate estimated time remaining
+                                        remaining_keys = total_passwords - tested
+                                        time_remaining = remaining_keys / speed if speed > 0 else 0
+                                        
+                                        # Update progress bar
+                                        progress.update(
+                                            task,
+                                            completed=tested,
+                                            description=f"[cyan]Testing {tested:,}/{total_passwords:,} keys at {speed:,.0f} keys/s"
+                                        )
+                                        
+                                        tested_keys = tested
+                                        last_update = current_time
+                                        
+                                except Exception as e:
+                                    continue
                     
-                finally:
-                    if process.poll() is None:
-                        process.terminate()
-                        process.wait()
+                    finally:
+                        if process.poll() is None:
+                            process.terminate()
+                            process.wait()
 
                 self.console.print("\n[yellow]Password not found in rockyou.txt, trying simple passwords...[/yellow]")
 
@@ -748,39 +737,31 @@ class HandshakeCaptureV2:
                 universal_newlines=True
             )
             
-            try:
-                while process.poll() is None:
-                    line = process.stdout.readline()
-                    if not line:
-                        continue
-                        
-                    if "KEY FOUND!" in line:
-                        with open(password_file, 'r') as f:
-                            password = f.read().strip()
-                            self.console.print(f"\n\n[green]Password found: {password}[/green]")
-                            return True
-                    elif "Tested" in line:
-                        try:
-                            tested = int(line.split('(')[1].split(' ')[0])
-                            progress = (tested / total_simple) * 100
-                            bar_width = 50
-                            filled = int(bar_width * progress / 100)
-                            bar = '█' * filled + '░' * (bar_width - filled)
-                            print(f"\r\033[K", end='')  # Clear the current line
-                            print(
-                                f"\r[*] Testing simple passwords: |{bar}| {progress:.1f}% "
-                                f"({tested}/{total_simple} passwords)",
-                                end=''
-                            )
-                        except:
-                            print(f"\r\033[K{line.strip()}", end='')
+            with Progress() as progress:
+                task = progress.add_task("[cyan]Testing simple passwords...", total=total_simple)
                 
-                print("\n")  # Add newline after progress bar completes
-                
-            finally:
-                if process.poll() is None:
-                    process.terminate()
-                    process.wait()
+                try:
+                    while process.poll() is None:
+                        line = process.stdout.readline()
+                        if not line:
+                            continue
+                            
+                        if "KEY FOUND!" in line:
+                            with open(password_file, 'r') as f:
+                                password = f.read().strip()
+                                self.console.print(f"\n\n[green]Password found: {password}[/green]")
+                                return True
+                        elif "Tested" in line:
+                            try:
+                                tested = int(line.split('(')[1].split(' ')[0])
+                                progress.update(task, completed=min(tested, total_simple))
+                            except:
+                                continue
+                    
+                finally:
+                    if process.poll() is None:
+                        process.terminate()
+                        process.wait()
             
             self.console.print("\n[yellow]Password not found. Suggestions:[/yellow]")
             self.console.print("1. Try using a larger wordlist")
