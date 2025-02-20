@@ -13,6 +13,7 @@ from modules.network_scanner import NetworkScanner
 from modules.deauth_attack import DeauthAttacker
 from modules.wps_attack import WPSAttacker
 from modules.handshake_capture import HandshakeCapture
+from modules.handshake_capture_v2 import HandshakeCaptureV2
 from modules.utils import setup_workspace, cleanup_workspace, log_activity, check_wireless_tools
 
 console = Console()
@@ -26,9 +27,10 @@ class EchoWraith:
             '3': ('Deauthentication', self.deauth_attack, 'Disconnect clients from target networks'),
             '4': ('WPS Analysis', self.wps_attack, 'Test WPS security'),
             '5': ('Handshake Capture', self.capture_handshake, 'Capture and analyze WPA/WPA2 handshakes'),
-            '6': ('View History', self.view_history, 'View previous session results'),
-            '7': ('Clean Workspace', self.clean_workspace, 'Delete all created files and directories'),
-            '8': ('Exit', self.exit_program, 'Exit EchoWraith')
+            '6': ('Handshake Capture v2', self.capture_handshake_v2, 'New improved handshake capture (Recommended)'),
+            '7': ('View History', self.view_history, 'View previous session results'),
+            '8': ('Clean Workspace', self.clean_workspace, 'Delete all created files and directories'),
+            '9': ('Exit', self.exit_program, 'Exit EchoWraith')
         }
         self.directories = setup_workspace()
         if not self.directories:
@@ -217,6 +219,19 @@ class EchoWraith:
         except Exception as e:
             self.console.print(f"[red]Error in handshake capture: {str(e)}[/red]")
 
+    def capture_handshake_v2(self):
+        """Start handshake capture using the new v2 implementation"""
+        try:
+            # Check wireless tools first
+            if not check_wireless_tools():
+                return
+
+            handshake = HandshakeCaptureV2()
+            handshake.start_capture()
+            log_activity(f"Handshake capture v2 completed - Target: {handshake.target_essid if handshake.target_essid else 'Unknown'}")
+        except Exception as e:
+            self.console.print(f"[red]Error in handshake capture v2: {str(e)}[/red]")
+
     def view_history(self):
         """View session history and captured data"""
         try:
@@ -349,7 +364,7 @@ class EchoWraith:
                 
                 module_func()
                 
-                if choice != '8':  # If not exit
+                if choice != '9':  # If not exit
                     input("\nPress Enter to continue...")
                 
             except KeyboardInterrupt:
