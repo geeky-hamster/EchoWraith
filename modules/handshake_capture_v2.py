@@ -545,12 +545,102 @@ class HandshakeCaptureV2:
                 pass 
 
     def crack_handshake(self, wordlist="/usr/share/wordlists/rockyou.txt"):
-        """Attempt to crack the captured handshake using both CPU and GPU methods with session support"""
+        """Attempt to crack the captured handshake using rockyou.txt first, then simple passwords"""
         try:
-            # First try simple passwords and common patterns
-            self.console.print("\n[yellow]Trying common passwords first...[/yellow]")
+            capfile = f"{self.capture_file}-01.cap"
+            password_file = os.path.join(self.data_path['passwords'], f'password_{self.target_bssid.replace(":", "")}.txt')
             
-            # Create list of simple passwords to try first
+            # First try rockyou.txt
+            custom_wordlist = os.path.join(self.data_path['passwords'], 'wordlist.txt')
+            if os.path.exists(custom_wordlist):
+                wordlist = custom_wordlist
+                self.console.print(f"[cyan]Using custom wordlist: {custom_wordlist}[/cyan]")
+            elif not os.path.exists(wordlist):
+                self.console.print(f"[yellow]Default wordlist not found: {wordlist}[/yellow]")
+                self.console.print("[yellow]Downloading rockyou.txt...[/yellow]")
+                try:
+                    download_cmd = [
+                        'wget',
+                        'https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt',
+                        '-O', custom_wordlist
+                    ]
+                    subprocess.run(download_cmd, check=True)
+                    wordlist = custom_wordlist
+                    self.console.print("[green]Successfully downloaded wordlist![/green]")
+                except:
+                    self.console.print("[red]Failed to download wordlist, falling back to simple passwords.[/red]")
+                    wordlist = None
+
+            if wordlist:
+                # Count total passwords in wordlist
+                total_passwords = 0
+                with open(wordlist, 'r', encoding='utf-8', errors='ignore') as f:
+                    total_passwords = sum(1 for _ in f)
+                
+                self.console.print(f"\n[cyan]Starting password cracking with rockyou.txt ({total_passwords:,} passwords)...[/cyan]")
+                
+                # Start cracking with rockyou.txt
+                crack_cmd = [
+                    'aircrack-ng',
+                    '-w', wordlist,
+                    '-l', password_file,
+                    '-b', self.target_bssid,
+                    capfile
+                ]
+                
+                start_time = time.time()
+                with Progress() as progress:
+                    task = progress.add_task("[cyan]Cracking password...", total=total_passwords)
+                    
+                    process = subprocess.Popen(
+                        crack_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        universal_newlines=True
+                    )
+                    
+                    while True:
+                        line = process.stdout.readline()
+                        if not line and process.poll() is not None:
+                            break
+                            
+                        if "KEY FOUND!" in line:
+                            with open(password_file, 'r') as f:
+                                password = f.read().strip()
+                                self.console.print(f"\n[green]Password found: {password}[/green]")
+                                return True
+                        elif "Tested" in line:
+                            try:
+                                # Extract progress information
+                                tested = int(line.split('(')[1].split(' ')[0])
+                                progress.update(task, completed=min(tested, total_passwords))
+                                
+                                # Calculate and display speed
+                                elapsed = time.time() - start_time
+                                if elapsed > 0:
+                                    speed = tested / elapsed
+                                    remaining = (total_passwords - tested) / speed if speed > 0 else 0
+                                    
+                                    # Format time remaining
+                                    hours = int(remaining / 3600)
+                                    minutes = int((remaining % 3600) / 60)
+                                    seconds = int(remaining % 60)
+                                    
+                                    self.console.print(
+                                        f"[cyan]Speed: {speed:,.0f} passwords/sec | "
+                                        f"Time remaining: {hours:02d}:{minutes:02d}:{seconds:02d}[/cyan]",
+                                        end='\r'
+                                    )
+                            except:
+                                pass
+
+                self.console.print("\n[yellow]Password not found in rockyou.txt, trying simple passwords...[/yellow]")
+
+            # If rockyou.txt failed or wasn't available, try simple passwords
+            self.console.print("\n[yellow]Trying simple passwords...[/yellow]")
+            
+            # Create list of simple passwords to try
             simple_passwords = [
                 "password", "12345678", "123456789", "1234567890",
                 self.target_essid, self.target_essid.lower(), self.target_essid.upper(),
@@ -583,18 +673,12 @@ class HandshakeCaptureV2:
                 "12345678", "87654321", "qwerty123"
             ])
             
-            # Create a temporary wordlist with simple passwords
+            # Create temporary wordlist with simple passwords
             temp_wordlist = os.path.join(self.data_path['passwords'], 'simple_passwords.txt')
             with open(temp_wordlist, 'w') as f:
                 f.write('\n'.join(simple_passwords))
             
-            # Try simple passwords first with progress display
-            self.console.print("[cyan]Testing simple passwords...[/cyan]")
-            
-            capfile = f"{self.capture_file}-01.cap"
-            password_file = os.path.join(self.data_path['passwords'], f'password_{self.target_bssid.replace(":", "")}.txt')
-            
-            # Try simple passwords with aircrack-ng
+            # Try simple passwords with progress display
             crack_cmd = [
                 'aircrack-ng',
                 '-w', temp_wordlist,
@@ -632,104 +716,7 @@ class HandshakeCaptureV2:
                         except:
                             pass
             
-            # If simple passwords didn't work, proceed with full wordlist
-            self.console.print("\n[yellow]Simple passwords not found, proceeding with full wordlist...[/yellow]")
-            
-            # Check for custom wordlist
-            custom_wordlist = os.path.join(self.data_path['passwords'], 'wordlist.txt')
-            if os.path.exists(custom_wordlist):
-                wordlist = custom_wordlist
-                self.console.print(f"[cyan]Using custom wordlist: {custom_wordlist}[/cyan]")
-            elif not os.path.exists(wordlist):
-                self.console.print(f"[yellow]Default wordlist not found: {wordlist}[/yellow]")
-                new_path = input("Enter path to wordlist (or press Enter to download rockyou.txt): ").strip()
-                
-                if new_path:
-                    if os.path.exists(new_path):
-                        wordlist = new_path
-                    else:
-                        self.console.print("[red]Invalid wordlist path![/red]")
-                        return False
-                else:
-                    # Download rockyou.txt
-                    self.console.print("[yellow]Downloading rockyou.txt...[/yellow]")
-                    try:
-                        download_cmd = [
-                            'wget',
-                            'https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt',
-                            '-O', custom_wordlist
-                        ]
-                        subprocess.run(download_cmd, check=True)
-                        wordlist = custom_wordlist
-                        self.console.print("[green]Successfully downloaded wordlist![/green]")
-                    except:
-                        self.console.print("[red]Failed to download wordlist![/red]")
-                        return False
-            
-            # Count total passwords in wordlist for progress calculation
-            total_passwords = 0
-            with open(wordlist, 'r', encoding='utf-8', errors='ignore') as f:
-                total_passwords = sum(1 for _ in f)
-            
-            self.console.print(f"\n[cyan]Starting password cracking with {total_passwords:,} passwords...[/cyan]")
-            
-            # Start cracking with full wordlist
-            crack_cmd = [
-                'aircrack-ng',
-                '-w', wordlist,
-                '-l', password_file,
-                '-b', self.target_bssid,
-                capfile
-            ]
-            
-            start_time = time.time()
-            with Progress() as progress:
-                task = progress.add_task("[cyan]Cracking password...", total=total_passwords)
-                
-                process = subprocess.Popen(
-                    crack_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    universal_newlines=True
-                )
-                
-                while True:
-                    line = process.stdout.readline()
-                    if not line and process.poll() is not None:
-                        break
-                        
-                    if "KEY FOUND!" in line:
-                        with open(password_file, 'r') as f:
-                            password = f.read().strip()
-                            self.console.print(f"\n[green]Password found: {password}[/green]")
-                            return True
-                    elif "Tested" in line:
-                        try:
-                            # Extract progress information
-                            tested = int(line.split('(')[1].split(' ')[0])
-                            progress.update(task, completed=min(tested, total_passwords))
-                            
-                            # Calculate and display speed
-                            elapsed = time.time() - start_time
-                            if elapsed > 0:
-                                speed = tested / elapsed
-                                remaining = (total_passwords - tested) / speed if speed > 0 else 0
-                                
-                                # Format time remaining
-                                hours = int(remaining / 3600)
-                                minutes = int((remaining % 3600) / 60)
-                                seconds = int(remaining % 60)
-                                
-                                self.console.print(
-                                    f"[cyan]Speed: {speed:,.0f} passwords/sec | "
-                                    f"Time remaining: {hours:02d}:{minutes:02d}:{seconds:02d}[/cyan]",
-                                    end='\r'
-                                )
-                        except:
-                            pass
-            
-            self.console.print("\n[yellow]Password not found in wordlist.[/yellow]")
+            self.console.print("\n[yellow]Password not found in simple passwords list.[/yellow]")
             return False
             
         except Exception as e:
