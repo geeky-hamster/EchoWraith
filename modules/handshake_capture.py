@@ -629,6 +629,7 @@ class HandshakeCapture:
                 network['Channel'],
                 network['ESSID'],
                 str(len(network['Clients']))
+            )
         
         self.console.print(table)
 
