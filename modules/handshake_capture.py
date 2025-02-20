@@ -844,3 +844,58 @@ class HandshakeCapture:
                 process.kill()
             except:
                 pass 
+
+    def get_connected_clients(self):
+        """Get list of clients currently connected to the target network"""
+        try:
+            clients = set()
+            temp_file = get_temp_path(f'clients_{self.target_bssid.replace(":", "")}')
+            
+            # Start airodump-ng to capture client data
+            monitor_cmd = [
+                'airodump-ng',
+                '--bssid', self.target_bssid,
+                '--channel', self.target_channel,
+                '--write', temp_file,
+                '--output-format', 'csv',
+                self.interface
+            ]
+            
+            # Run airodump-ng for a short duration
+            process = subprocess.Popen(
+                monitor_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            
+            # Let it run for 5 seconds to gather client data
+            time.sleep(5)
+            process.terminate()
+            
+            # Parse the CSV file for clients
+            csv_file = f"{temp_file}-01.csv"
+            if os.path.exists(csv_file):
+                with open(csv_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    
+                    # Find the client section
+                    client_section = False
+                    for line in lines:
+                        if 'Station MAC' in line:
+                            client_section = True
+                            continue
+                        if client_section and line.strip() and ',' in line:
+                            parts = line.strip().split(',')
+                            if len(parts) >= 6 and parts[5].strip() == self.target_bssid:
+                                client_mac = parts[0].strip()
+                                if client_mac and ':' in client_mac:
+                                    clients.add(client_mac)
+                                    self.console.print(f"[green]Found connected client: {client_mac}[/green]")
+            
+            # Cleanup temporary files
+            cleanup_temp_files()
+            return list(clients)
+            
+        except Exception as e:
+            self.console.print(f"[yellow]Error getting connected clients: {str(e)}[/yellow]")
+            return [] 
