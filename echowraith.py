@@ -13,7 +13,6 @@ from modules.network_scanner import NetworkScanner
 from modules.deauth_attack import DeauthAttacker
 from modules.wps_attack import WPSAttacker
 from modules.handshake_capture import HandshakeCapture
-from modules.handshake_capture_v2 import HandshakeCaptureV2
 from modules.utils import setup_workspace, cleanup_workspace, log_activity, check_wireless_tools
 
 console = Console()
@@ -26,11 +25,10 @@ class EchoWraith:
             '2': ('Network Scanner', self.network_scan, 'Discover and analyze nearby WiFi networks'),
             '3': ('Deauthentication', self.deauth_attack, 'Disconnect clients from target networks'),
             '4': ('WPS Analysis', self.wps_attack, 'Test WPS security'),
-            '5': ('Handshake Capture', self.capture_handshake, 'Capture and analyze WPA/WPA2 handshakes'),
-            '6': ('Handshake Capture v2', self.capture_handshake_v2, 'New improved handshake capture (Recommended)'),
-            '7': ('View History', self.view_history, 'View previous session results'),
-            '8': ('Clean Workspace', self.clean_workspace, 'Delete all created files and directories'),
-            '9': ('Exit', self.exit_program, 'Exit EchoWraith')
+            '5': ('Handshake Capture', self.capture_handshake, '✨ Advanced WPA/WPA2 handshake capture with auto password cracking'),
+            '6': ('View History', self.view_history, 'View previous session results'),
+            '7': ('Clean Workspace', self.clean_workspace, 'Delete all created files and directories'),
+            '8': ('Exit', self.exit_program, 'Exit EchoWraith')
         }
         self.directories = setup_workspace()
         if not self.directories:
@@ -207,7 +205,7 @@ class EchoWraith:
             self.console.print(f"[red]Error in WPS attack: {str(e)}[/red]")
 
     def capture_handshake(self):
-        """Start handshake capture"""
+        """Start handshake capture with automatic password cracking"""
         try:
             # Check wireless tools first
             if not check_wireless_tools():
@@ -218,19 +216,6 @@ class EchoWraith:
             log_activity(f"Handshake capture completed - Target: {handshake.target_essid if handshake.target_essid else 'Unknown'}")
         except Exception as e:
             self.console.print(f"[red]Error in handshake capture: {str(e)}[/red]")
-
-    def capture_handshake_v2(self):
-        """Start handshake capture using the new v2 implementation"""
-        try:
-            # Check wireless tools first
-            if not check_wireless_tools():
-                return
-
-            handshake = HandshakeCaptureV2()
-            handshake.start_capture()
-            log_activity(f"Handshake capture v2 completed - Target: {handshake.target_essid if handshake.target_essid else 'Unknown'}")
-        except Exception as e:
-            self.console.print(f"[red]Error in handshake capture v2: {str(e)}[/red]")
 
     def view_history(self):
         """View session history and captured data"""
@@ -327,13 +312,29 @@ class EchoWraith:
 
     def display_menu(self):
         """Display the main menu"""
-        table = Table(title="Available Modules")
-        table.add_column("Option", style="cyan", justify="center")
-        table.add_column("Module", style="green")
+        table = Table(
+            title="Available Modules",
+            show_header=True,
+            header_style="bold magenta",
+            border_style="cyan"
+        )
+        table.add_column("Option", style="cyan", justify="center", width=8)
+        table.add_column("Module", style="green", width=30)
         table.add_column("Description", style="yellow")
 
-        for key, (name, _, description) in self.modules.items():
-            table.add_row(key, name, description)
+        # Sort menu items by option number
+        sorted_items = sorted(self.modules.items(), key=lambda x: int(x[0]))
+        
+        for key, (name, _, description) in sorted_items:
+            # Highlight recommended option
+            if "Recommended" in description:
+                table.add_row(
+                    f"[bold cyan]{key}[/bold cyan]",
+                    f"[bold green]{name}[/bold green]",
+                    f"[bold yellow]{description}[/bold yellow]"
+                )
+            else:
+                table.add_row(key, name, description)
 
         self.console.print(table)
 
@@ -364,7 +365,7 @@ class EchoWraith:
                 
                 module_func()
                 
-                if choice != '9':  # If not exit
+                if choice != '8':  # If not exit
                     input("\nPress Enter to continue...")
                 
             except KeyboardInterrupt:
