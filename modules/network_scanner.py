@@ -2,11 +2,12 @@
 
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 import subprocess
 import threading
 import time
 import os
+import json
 from datetime import datetime
 from modules.utils import (
     check_wireless_tools,
@@ -40,7 +41,12 @@ class NetworkScanner:
             )
             
             # Show progress while scanning
-            with Progress() as progress:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TimeElapsedColumn(),
+            ) as progress:
                 task = progress.add_task("[cyan]Scanning for networks...", total=self.scan_time)
                 
                 for i in range(self.scan_time):
@@ -63,10 +69,20 @@ class NetworkScanner:
                                         if bssid and ':' in bssid:  # Valid BSSID
                                             networks.append({
                                                 'bssid': bssid,
+                                                'first_seen': parts[1].strip(),
+                                                'last_seen': parts[2].strip(),
                                                 'channel': parts[3].strip(),
-                                                'encryption': parts[5].strip(),
+                                                'speed': parts[4].strip(),
+                                                'privacy': parts[5].strip(),
+                                                'cipher': parts[6].strip(),
+                                                'authentication': parts[7].strip(),
+                                                'power': parts[8].strip(),
+                                                'beacons': parts[9].strip(),
+                                                'iv': parts[10].strip(),
+                                                'lan_ip': parts[11].strip(),
+                                                'id_length': parts[12].strip(),
                                                 'essid': parts[13].strip().rstrip('\x00'),
-                                                'signal': parts[8].strip(),
+                                                'key': parts[14].strip() if len(parts) > 14 else '',
                                                 'clients': set()
                                             })
                             
@@ -81,9 +97,17 @@ class NetworkScanner:
                                     if len(parts) >= 6:
                                         client_mac = parts[0].strip()
                                         ap_mac = parts[5].strip()
+                                        client_info = {
+                                            'mac': client_mac,
+                                            'first_seen': parts[1].strip(),
+                                            'last_seen': parts[2].strip(),
+                                            'power': parts[3].strip(),
+                                            'packets': parts[4].strip(),
+                                            'probed_essids': [essid.strip() for essid in parts[6:] if essid.strip()]
+                                        }
                                         for network in networks:
                                             if network['bssid'] == ap_mac:
-                                                network['clients'].add(client_mac)
+                                                network['clients'].add(json.dumps(client_info))
                                                 
                             # Display current results
                             if networks:
@@ -109,17 +133,25 @@ class NetworkScanner:
         table.add_column("BSSID", style="cyan")
         table.add_column("Channel", justify="center")
         table.add_column("ESSID", style="green")
-        table.add_column("Encryption", style="yellow")
-        table.add_column("Signal", justify="right")
+        table.add_column("Privacy", style="yellow")
+        table.add_column("Power (dBm)", justify="right")
+        table.add_column("Speed", justify="center")
         table.add_column("Clients", justify="center")
 
-        for network in sorted(networks, key=lambda x: x.get('signal', '0'), reverse=True):
+        for network in sorted(networks, key=lambda x: int(x.get('power', '0') or '0'), reverse=True):
+            power = network['power']
+            if power.isdigit() or (power.startswith('-') and power[1:].isdigit()):
+                power = f"{int(power)} dBm"
+            else:
+                power = "N/A"
+
             table.add_row(
                 network['bssid'],
                 network['channel'],
                 network['essid'] or "<hidden>",
-                network['encryption'],
-                network['signal'],
+                f"{network['privacy']}/{network['cipher']}/{network['authentication']}",
+                power,
+                f"{network['speed']} MB/s",
                 str(len(network['clients']))
             )
 
@@ -159,26 +191,65 @@ class NetworkScanner:
             # Display final results
             self.display_networks(networks)
 
-            # Save results
+            # Save detailed results
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            save_path = get_data_path('scans', f'scan_{timestamp}.txt')
+            save_path = get_data_path('scans', f'scan_{timestamp}')
+            
+            # Save JSON format for machine processing
+            with open(f"{save_path}.json", 'w') as f:
+                # Convert sets to lists for JSON serialization
+                networks_json = []
+                for network in networks:
+                    network_copy = network.copy()
+                    network_copy['clients'] = [json.loads(client) for client in network['clients']]
+                    networks_json.append(network_copy)
+                json.dump(networks_json, f, indent=4)
 
-            with open(save_path, 'w') as f:
+            # Save human-readable format
+            with open(f"{save_path}.txt", 'w') as f:
                 f.write("Network Scan Results\n")
-                f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("===================\n\n")
+                f.write(f"Scan Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"Interface: {self.interface}\n")
-                f.write(f"Duration: {self.scan_time} seconds\n\n")
-                f.write("BSSID,Channel,ESSID,Encryption,Signal,Clients\n")
-                for network in sorted(networks, key=lambda x: x.get('signal', '0'), reverse=True):
-                    f.write(f"{network['bssid']},{network['channel']},{network['essid']},"
-                           f"{network['encryption']},{network['signal']},{len(network['clients'])}\n")
-                    if network['clients']:
-                        f.write("Connected clients:\n")
-                        for client in network['clients']:
-                            f.write(f"  {client}\n")
-                        f.write("\n")
+                f.write(f"Duration: {self.scan_time} seconds\n")
+                f.write(f"Networks Found: {len(networks)}\n\n")
 
-            self.console.print(f"\n[green]Scan results saved to: {save_path}[/green]")
+                for i, network in enumerate(sorted(networks, key=lambda x: int(x.get('power', '0') or '0'), reverse=True), 1):
+                    f.write(f"Network {i}\n")
+                    f.write("-" * 50 + "\n")
+                    f.write(f"ESSID: {network['essid'] or '<hidden>'}\n")
+                    f.write(f"BSSID: {network['bssid']}\n")
+                    f.write(f"Channel: {network['channel']}\n")
+                    f.write(f"Signal Strength: {network['power']} dBm\n")
+                    f.write(f"Speed: {network['speed']} MB/s\n")
+                    f.write(f"Privacy: {network['privacy']}\n")
+                    f.write(f"Cipher: {network['cipher']}\n")
+                    f.write(f"Authentication: {network['authentication']}\n")
+                    f.write(f"First Seen: {network['first_seen']}\n")
+                    f.write(f"Last Seen: {network['last_seen']}\n")
+                    f.write(f"Beacons: {network['beacons']}\n")
+                    f.write(f"Data Packets: {network['iv']}\n")
+                    if network['lan_ip']:
+                        f.write(f"LAN IP: {network['lan_ip']}\n")
+                    
+                    if network['clients']:
+                        f.write("\nConnected Clients:\n")
+                        for client_json in network['clients']:
+                            client = json.loads(client_json)
+                            f.write(f"\n  Client MAC: {client['mac']}\n")
+                            f.write(f"  First Seen: {client['first_seen']}\n")
+                            f.write(f"  Last Seen: {client['last_seen']}\n")
+                            f.write(f"  Signal Strength: {client['power']} dBm\n")
+                            f.write(f"  Packets: {client['packets']}\n")
+                            if client['probed_essids']:
+                                f.write("  Probed Networks:\n")
+                                for essid in client['probed_essids']:
+                                    f.write(f"    - {essid}\n")
+                    f.write("\n")
+
+            self.console.print(f"\n[green]Detailed scan results saved to:[/green]")
+            self.console.print(f"[cyan]- {save_path}.txt[/cyan] (Human readable)")
+            self.console.print(f"[cyan]- {save_path}.json[/cyan] (Machine readable)")
             log_activity(f"Network scan completed - Found {len(networks)} networks")
 
         except Exception as e:
