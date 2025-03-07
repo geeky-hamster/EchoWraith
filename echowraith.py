@@ -3,6 +3,7 @@
 import sys
 import os
 import subprocess
+import shutil
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -157,8 +158,20 @@ class EchoWraith:
                 default="y"
             ) == "y"
             
-            cleanup_workspace(keep_logs)
-            log_activity("Workspace cleaned" + (" (kept logs)" if keep_logs else ""))
+            data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+            
+            if keep_logs:
+                # If keeping logs, remove contents of other directories
+                for subdir in ['handshakes', 'passwords', 'scans', 'wps', 'deauth', 'temp', 'configs']:
+                    dir_path = os.path.join(data_dir, subdir)
+                    if os.path.exists(dir_path):
+                        shutil.rmtree(dir_path)
+                        os.makedirs(dir_path)
+            else:
+                # Remove entire data directory
+                shutil.rmtree(data_dir)
+                self.console.print("[green]Workspace cleaned successfully! Exiting...[/green]")
+                sys.exit(0)
             
         except Exception as e:
             self.console.print(f"[red]Error during cleanup: {str(e)}[/red]")
@@ -233,6 +246,10 @@ class EchoWraith:
             # Read from activity log
             log_file = os.path.join(data_dir, 'logs', 'activity.log')
             if os.path.exists(log_file):
+                # Ensure logs directory exists
+                if not os.path.exists(os.path.dirname(log_file)):
+                    os.makedirs(os.path.dirname(log_file))
+
                 with open(log_file, 'r') as f:
                     for line in f:
                         if line.strip():

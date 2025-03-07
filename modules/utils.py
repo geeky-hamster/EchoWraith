@@ -80,6 +80,10 @@ def log_activity(message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(log_file, 'a') as f:
             f.write(f"[{timestamp}] {message}\n")
+        
+        # Ensure logs directory exists
+        if not os.path.exists(os.path.dirname(log_file)):
+            os.makedirs(os.path.dirname(log_file))
     except Exception as e:
         console.print(f"[red]Error logging activity: {str(e)}[/red]")
 
