@@ -306,5 +306,4 @@ class WPSAttacker:
                              stderr=subprocess.DEVNULL)
             except:
                 pass
-
-            input("\nPress Enter to continue...") 
+            pass 

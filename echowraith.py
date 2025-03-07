@@ -164,6 +164,7 @@ class EchoWraith:
             self.console.print(f"[red]Error during cleanup: {str(e)}[/red]")
         
         input("\nPress Enter to continue...")
+        self.exit_program()
 
     def network_scan(self):
         """Start network scanning"""
@@ -363,10 +364,11 @@ class EchoWraith:
                 module_name, module_func, _ = self.modules[choice]
                 self.console.print(f"\n[bold green]Running {module_name}...[/bold green]")
                 
-                module_func()
+                module_func()  # Run the selected module
                 
+                # Only prompt for Enter once after the task is completed
                 if choice != '8':  # If not exit
-                    input("\nPress Enter to continue...")
+                    input("\nPress Enter to return to the menu...")  # Change prompt message for clarity
                 
             except KeyboardInterrupt:
                 self.console.print("\n[yellow]Operation cancelled by user[/yellow]")

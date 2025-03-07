@@ -191,7 +191,7 @@ class DeauthAttacker:
             except:
                 pass
 
-            input("\nPress Enter to continue...")
+            pass  # Replaced "input('\nPress Enter to continue...')" with pass
 
     def send_deauth_packets(self):
         """Send deauthentication packets with improved reliability and continuous blocking"""

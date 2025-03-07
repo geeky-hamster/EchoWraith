@@ -486,4 +486,4 @@ class HandshakeCapture:
             except:
                 pass
             
-            input("\nPress Enter to continue...") 
+            pass 
