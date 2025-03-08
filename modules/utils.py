@@ -96,17 +96,25 @@ def scan_networks(interface=None):
                 console.print("[red]No wireless interface available![/red]")
                 return []
 
-        # Ensure monitor mode
+        # Ensure monitor mode is enabled
         if not InterfaceManager.ensure_monitor_mode():
-            console.print("[red]Failed to set monitor mode![/red]")
+            console.print("[red]Failed to enable monitor mode for scanning![/red]")
             return []
 
+        # Get the current interface again as it might have changed (e.g., wlan0 -> wlan0mon)
+        interface = InterfaceManager.get_current_interface()
         networks = []
         scan_file = get_data_path('scans', f'scan_{int(time.time())}')
         
-        # Start airodump-ng scan
+        # Start airodump-ng scan with better parameters
         scan_process = subprocess.Popen(
-            ['airodump-ng', '--output-format', 'csv', '-w', scan_file, interface],
+            [
+                'airodump-ng',
+                '--output-format', 'csv',
+                '--write', scan_file,
+                '--write-interval', '1',
+                interface
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
@@ -115,57 +123,78 @@ def scan_networks(interface=None):
         with Progress() as progress:
             task = progress.add_task("[cyan]Scanning for networks...", total=100)
             
-            for i in range(10):  # Scan for 10 seconds
+            # Scan for exactly 10 seconds
+            for i in range(10):
                 progress.update(task, advance=10)
                 time.sleep(1)
+                
+                # Check if we have results already
+                csv_file = f"{scan_file}-01.csv"
+                if os.path.exists(csv_file):
+                    try:
+                        with open(csv_file, 'r', encoding='utf-8') as f:
+                            if len(f.readlines()) > 3:  # If we have more than header lines
+                                continue  # Keep scanning for full 10 seconds
+                    except:
+                        pass
             
             scan_process.terminate()
             time.sleep(1)
-        
-        # Parse scan results
-        try:
-            with open(f"{scan_file}-01.csv", 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            for line in lines[2:]:  # Skip headers
-                if line.strip() and ',' in line:
-                    parts = line.strip().split(',')
-                    if len(parts) >= 14:  # Valid network line
-                        bssid = parts[0].strip()
-                        if bssid and ':' in bssid:  # Valid BSSID
-                            networks.append({
-                                'BSSID': bssid,
-                                'Channel': parts[3].strip(),
-                                'ESSID': parts[13].strip().rstrip('\x00'),
-                                'Encryption': parts[5].strip(),
-                                'Clients': []
-                            })
-            
-            # Get connected clients
-            client_section = False
-            for line in lines:
-                if 'Station MAC' in line:
-                    client_section = True
-                    continue
-                if client_section and line.strip() and ',' in line:
-                    parts = line.strip().split(',')
-                    if len(parts) >= 6:
-                        client_mac = parts[0].strip()
-                        ap_mac = parts[5].strip()
-                        for network in networks:
-                            if network['BSSID'] == ap_mac:
-                                network['Clients'].append(client_mac)
-            
-        except FileNotFoundError:
-            console.print("[red]Error: Scan output file not found.[/red]")
-        finally:
-            # Cleanup temporary files
-            os.system(f"rm -f {scan_file}*")
-        
+
+        # Process scan results
+        csv_file = f"{scan_file}-01.csv"
+        if os.path.exists(csv_file):
+            try:
+                with open(csv_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    
+                    # Process APs
+                    ap_section = True
+                    for line in lines[2:]:  # Skip headers
+                        if not line.strip():  # Empty line indicates end of AP section
+                            ap_section = False
+                            continue
+                            
+                        if ap_section and ',' in line:
+                            parts = line.strip().split(',')
+                            if len(parts) >= 14:  # Valid network line
+                                bssid = parts[0].strip()
+                                if bssid and ':' in bssid:  # Valid BSSID
+                                    networks.append({
+                                        'BSSID': bssid,
+                                        'Channel': parts[3].strip(),
+                                        'ESSID': parts[13].strip(),
+                                        'Encryption': parts[5].strip(),
+                                        'Clients': []
+                                    })
+                    
+                    # Process clients
+                    client_section = False
+                    for line in lines:
+                        if 'Station MAC' in line:
+                            client_section = True
+                            continue
+                        if client_section and line.strip() and ',' in line:
+                            parts = line.strip().split(',')
+                            if len(parts) >= 6:
+                                client_mac = parts[0].strip()
+                                ap_mac = parts[5].strip()
+                                if client_mac and ':' in client_mac and ap_mac and ':' in ap_mac:
+                                    for network in networks:
+                                        if network['BSSID'] == ap_mac:
+                                            network['Clients'].append(client_mac)
+
+                if not networks:
+                    console.print("[yellow]No networks found during scan.[/yellow]")
+            except Exception as e:
+                console.print(f"[yellow]Error parsing scan results: {str(e)}[/yellow]")
+
+        # Cleanup temporary files
+        cleanup_temp_files()
         return networks
-        
+
     except Exception as e:
-        console.print(f"[red]Error during scan: {str(e)}[/red]")
+        console.print(f"[red]Error scanning networks: {str(e)}[/red]")
         return []
 
 def display_networks(networks):

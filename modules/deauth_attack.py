@@ -14,7 +14,9 @@ from .utils import (
     get_data_path,
     log_activity,
     get_temp_path,
-    cleanup_temp_files
+    cleanup_temp_files,
+    get_interface,
+    setup_monitor_mode
 )
 from .interface_manager import InterfaceManager
 from rich.table import Table
@@ -39,8 +41,10 @@ class DeauthAttacker:
         """Get target AP and client information"""
         try:
             # First scan for networks
+            self.console.print("\n[cyan]Starting network scan...[/cyan]")
             networks = scan_networks(self.interface)
             if not networks:
+                self.console.print("[red]No networks found during scan.[/red]")
                 return False
 
             # Let user select target
@@ -106,26 +110,32 @@ class DeauthAttacker:
     def start_attack(self):
         """Start deauthentication attack"""
         try:
-            # Get interface and ensure monitor mode
-            if not InterfaceManager.ensure_monitor_mode():
-                self.console.print("[red]Failed to set monitor mode. Aborting attack.[/red]")
-                return
-
-            self.interface = InterfaceManager.get_current_interface()
+            # Get interface
+            self.interface = get_interface()
             if not self.interface:
-                self.console.print("[red]No wireless interface available.[/red]")
+                return
+            
+            # Setup monitor mode
+            self.interface = setup_monitor_mode(self.interface)
+            if not self.interface:
+                self.console.print("[red]Failed to enable monitor mode![/red]")
                 return
 
             # Get target information
             if not self._get_target_info():
                 return
 
+            # Initialize attack parameters
+            self.running = True
+            self.packets_sent = 0
+            self.start_time = time.time()
+            self.clients.clear()
+
             # Start attack
             self.console.print("\n[yellow]Starting deauthentication attack...[/yellow]")
+            self.console.print(f"[cyan]Using interface: {self.interface}[/cyan]")
+            self.console.print(f"[cyan]Target Network: {self.target_essid} ({self.target_bssid})[/cyan]")
             self.console.print("[cyan]Press Ctrl+C to stop the attack[/cyan]")
-
-            self.running = True
-            self.start_time = time.time()
 
             # Start client monitoring thread
             monitor_thread = threading.Thread(target=self.monitor_clients)
@@ -151,22 +161,23 @@ class DeauthAttacker:
                 self.status_thread.join()
             
             # Log attack details
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_path = get_data_path('deauth', f'deauth_{timestamp}.txt')
-            
-            with open(log_path, 'w') as f:
-                f.write(f"Deauthentication Attack Log\n")
-                f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Interface: {self.interface}\n")
-                f.write(f"Target AP: {self.target_bssid}\n")
-                f.write(f"Target ESSID: {self.target_essid}\n")
-                f.write(f"Target Client: {self.target_client}\n")
-                f.write(f"Packets Sent: {self.packets_sent}\n")
-                f.write(f"Duration: {int(time.time() - self.start_time)} seconds\n")
-                f.write(f"Unique Clients Targeted: {len(self.clients)}\n")
+            if self.start_time is not None:  # Only log if attack actually started
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                log_path = get_data_path('deauth', f'deauth_{timestamp}.txt')
+                
+                with open(log_path, 'w') as f:
+                    f.write(f"Deauthentication Attack Log\n")
+                    f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Interface: {self.interface}\n")
+                    f.write(f"Target AP: {self.target_bssid}\n")
+                    f.write(f"Target ESSID: {self.target_essid}\n")
+                    f.write(f"Target Client: {self.target_client}\n")
+                    f.write(f"Packets Sent: {self.packets_sent}\n")
+                    f.write(f"Duration: {int(time.time() - self.start_time)} seconds\n")
+                    f.write(f"Unique Clients Targeted: {len(self.clients)}\n")
 
-            self.console.print(f"\n[green]Attack log saved to: {log_path}[/green]")
-            log_activity(f"Deauth attack completed - Target: {self.target_essid or self.target_bssid}")
+                self.console.print(f"\n[green]Attack log saved to: {log_path}[/green]")
+                log_activity(f"Deauth attack completed - Target: {self.target_essid or self.target_bssid}")
 
     def send_deauth_packets(self):
         """Send deauthentication packets with improved reliability and continuous blocking"""
@@ -276,28 +287,41 @@ class DeauthAttacker:
 
     def display_status(self):
         """Display attack status with improved metrics"""
+        last_update = time.time()
+        
         while self.running:
             try:
-                elapsed = time.time() - self.start_time
-                rate = self.packets_sent / elapsed if elapsed > 0 else 0
+                current_time = time.time()
+                if self.start_time is None:
+                    continue  # Skip if attack hasn't properly started
                 
-                self.console.clear()
-                self.console.print("\n[bold cyan]Deauthentication Attack Status:[/bold cyan]")
-                self.console.print(f"Target Network: {self.target_essid}")
-                self.console.print(f"Target BSSID: {self.target_bssid}")
-                if self.target_client:
-                    self.console.print(f"Target Client: {self.target_client}")
-                else:
-                    self.console.print("Target: All Clients (Broadcast)")
-                self.console.print(f"Channel: {self.target_channel}")
-                self.console.print(f"Packets Sent: {self.packets_sent}")
-                self.console.print(f"Duration: {int(elapsed)}s")
-                self.console.print(f"Rate: {int(rate)} packets/s")
-                self.console.print("\n[yellow]Press Ctrl+C to stop[/yellow]")
+                elapsed = current_time - self.start_time
+                rate = self.packets_sent / max(elapsed, 0.1)  # Avoid division by zero
                 
+                # Update display at most once per second
+                if current_time - last_update >= 1.0:
+                    self.console.clear()
+                    self.console.print("\n[bold cyan]Deauthentication Attack Status:[/bold cyan]")
+                    self.console.print(f"Target Network: {self.target_essid or 'Unknown'}")
+                    self.console.print(f"Target BSSID: {self.target_bssid or 'Unknown'}")
+                    if self.target_client and self.target_client != "FF:FF:FF:FF:FF:FF":
+                        self.console.print(f"Target Client: {self.target_client}")
+                    else:
+                        self.console.print("Target: All Clients (Broadcast)")
+                    self.console.print(f"Channel: {self.target_channel or 'Unknown'}")
+                    self.console.print(f"Interface: {self.interface}")
+                    self.console.print(f"Packets Sent: {self.packets_sent}")
+                    self.console.print(f"Duration: {int(elapsed)}s")
+                    self.console.print(f"Rate: {int(rate)} packets/s")
+                    self.console.print(f"Active Clients: {len(self.clients)}")
+                    self.console.print("\n[yellow]Press Ctrl+C to stop[/yellow]")
+                    last_update = current_time
+                
+                time.sleep(0.1)  # Reduce CPU usage
+            except Exception as e:
+                self.console.print(f"[red]Error in status display: {str(e)}[/red]")
                 time.sleep(1)
-            except:
-                break
+                continue
 
     def select_client(self):
         """Select specific client to attack"""

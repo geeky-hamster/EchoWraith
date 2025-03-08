@@ -64,16 +64,19 @@ class InterfaceManager:
         """Ensure interface is in monitor mode"""
         interface = InterfaceManager.get_current_interface()
         if not interface:
+            console.print("[red]No wireless interface available.[/red]")
             return False
 
         try:
+            # Check if already in monitor mode
+            result = subprocess.run(['iwconfig', interface], capture_output=True, text=True)
+            if 'Mode:Monitor' in result.stdout:
+                InterfaceManager.set_interface_mode('monitor')
+                return True
+
             # Kill interfering processes
             subprocess.run(['airmon-ng', 'check', 'kill'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(1)
-
-            # Check if already in monitor mode
-            if InterfaceManager.get_interface_mode() == 'monitor':
-                return True
 
             # Try multiple methods to enable monitor mode
             methods = [
@@ -92,15 +95,38 @@ class InterfaceManager:
                     if 'Mode:Monitor' in result.stdout:
                         InterfaceManager.set_interface_mode('monitor')
                         return True
+
+                    # Check if interface name changed (e.g., wlan0mon)
+                    mon_interface = interface + 'mon'
+                    if os.path.exists(f'/sys/class/net/{mon_interface}'):
+                        # Verify the mon interface is in monitor mode
+                        result = subprocess.run(['iwconfig', mon_interface], capture_output=True, text=True)
+                        if 'Mode:Monitor' in result.stdout:
+                            InterfaceManager.set_current_interface(mon_interface)
+                            InterfaceManager.set_interface_mode('monitor')
+                            return True
                 except:
                     continue
 
-            # If all methods failed, try with mon suffix
-            mon_interface = interface + 'mon'
-            if os.path.exists(f'/sys/class/net/{mon_interface}'):
-                InterfaceManager.set_current_interface(mon_interface)
-                InterfaceManager.set_interface_mode('monitor')
-                return True
+            # Final attempt with iw
+            try:
+                # Bring interface down
+                subprocess.run(['ip', 'link', 'set', interface, 'down'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1)
+                # Set monitor mode
+                subprocess.run(['iw', 'dev', interface, 'set', 'monitor', 'none'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1)
+                # Bring interface up
+                subprocess.run(['ip', 'link', 'set', interface, 'up'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1)
+                
+                # Verify monitor mode one last time
+                result = subprocess.run(['iwconfig', interface], capture_output=True, text=True)
+                if 'Mode:Monitor' in result.stdout:
+                    InterfaceManager.set_interface_mode('monitor')
+                    return True
+            except:
+                pass
 
             console.print("[red]Failed to enable monitor mode.[/red]")
             return False
