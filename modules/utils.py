@@ -8,35 +8,32 @@ import time
 import os
 import shutil
 from datetime import datetime
+from .interface_manager import InterfaceManager
 
 console = Console()
 
 def setup_workspace():
-    """Setup workspace directories"""
+    """Create necessary directories for the toolkit"""
     try:
-        # Get the program's directory
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        data_dir = os.path.join(base_dir, 'data')
-        
-        # Create main data directory and subdirectories
         directories = {
-            'handshakes': os.path.join(data_dir, 'handshakes'),
-            'passwords': os.path.join(data_dir, 'passwords'),
-            'logs': os.path.join(data_dir, 'logs'),
-            'scans': os.path.join(data_dir, 'scans'),
-            'wps': os.path.join(data_dir, 'wps'),
-            'deauth': os.path.join(data_dir, 'deauth'),
-            'temp': os.path.join(data_dir, 'temp'),  # For temporary files
-            'configs': os.path.join(data_dir, 'configs')    # For configuration files
+            'data': ['handshakes', 'passwords', 'logs', 'scans', 'wps', 'deauth', 'temp', 'configs', 'wordlists']
         }
         
-        for dir_name, dir_path in directories.items():
-            os.makedirs(dir_path, exist_ok=True)
+        for parent, subdirs in directories.items():
+            parent_dir = os.path.join(base_dir, parent)
+            if not os.path.exists(parent_dir):
+                os.makedirs(parent_dir)
             
-        return directories
+            for subdir in subdirs:
+                dir_path = os.path.join(parent_dir, subdir)
+                if not os.path.exists(dir_path):
+                    os.makedirs(dir_path)
+        
+        return True
     except Exception as e:
         console.print(f"[red]Error setting up workspace: {str(e)}[/red]")
-        return None
+        return False
 
 def cleanup_workspace(keep_logs=False):
     """Clean up all created files and directories"""
@@ -74,22 +71,36 @@ def get_data_path(module_name, filename):
         return None
 
 def log_activity(message):
-    """Log activity with timestamp"""
+    """Log toolkit activity"""
     try:
-        log_file = get_data_path('logs', 'activity.log')
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(log_file, 'a') as f:
-            f.write(f"[{timestamp}] {message}\n")
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        log_dir = os.path.join(base_dir, 'data', 'logs')
+        log_file = os.path.join(log_dir, 'activity.log')
         
-        # Ensure logs directory exists
-        if not os.path.exists(os.path.dirname(log_file)):
-            os.makedirs(os.path.dirname(log_file))
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        
+        timestamp = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
+        with open(log_file, 'a') as f:
+            f.write(f"{timestamp} {message}\n")
     except Exception as e:
         console.print(f"[red]Error logging activity: {str(e)}[/red]")
 
-def scan_networks(interface):
+def scan_networks(interface=None):
     """Common network scanning functionality for all modules"""
     try:
+        # Get interface if not provided
+        if not interface:
+            interface = InterfaceManager.get_current_interface()
+            if not interface:
+                console.print("[red]No wireless interface available![/red]")
+                return []
+
+        # Ensure monitor mode
+        if not InterfaceManager.ensure_monitor_mode():
+            console.print("[red]Failed to set monitor mode![/red]")
+            return []
+
         networks = []
         scan_file = get_data_path('scans', f'scan_{int(time.time())}')
         
@@ -207,112 +218,6 @@ def select_target(networks):
 
     return None, None, None, []
 
-def setup_monitor_mode(interface):
-    """Setup monitor mode with improved reliability"""
-    try:
-        # Kill interfering processes
-        subprocess.run(['airmon-ng', 'check', 'kill'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(1)
-
-        # Check if already in monitor mode
-        if 'mon' in interface:
-            return interface
-
-        # Try multiple methods to enable monitor mode
-        methods = [
-            ['airmon-ng', 'start', interface],
-            ['iw', 'dev', interface, 'set', 'monitor', 'none'],
-            ['iwconfig', interface, 'mode', 'monitor']
-        ]
-
-        for method in methods:
-            try:
-                subprocess.run(method, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                time.sleep(2)
-                
-                # Verify monitor mode
-                result = subprocess.run(['iwconfig', interface], capture_output=True, text=True)
-                if 'Mode:Monitor' in result.stdout:
-                    return interface
-            except:
-                continue
-
-        # If all methods failed, try with mon suffix
-        mon_interface = interface + 'mon'
-        if os.path.exists(f'/sys/class/net/{mon_interface}'):
-            return mon_interface
-
-        console.print("[red]Failed to enable monitor mode.[/red]")
-        return None
-
-    except Exception as e:
-        console.print(f"[red]Error setting up monitor mode: {str(e)}[/red]")
-        return None
-
-def get_interface():
-    """Get available wireless interfaces with improved detection"""
-    try:
-        interfaces = []
-        
-        # Method 1: Using iwconfig
-        result = subprocess.run(['iwconfig'], capture_output=True, text=True)
-        for line in result.stdout.split('\n'):
-            if 'IEEE 802.11' in line:
-                interface = line.split()[0]
-                interfaces.append(interface)
-        
-        # Method 2: Check /sys/class/net for wireless devices
-        if not interfaces:
-            for iface in os.listdir('/sys/class/net'):
-                if os.path.exists(f'/sys/class/net/{iface}/wireless'):
-                    interfaces.append(iface)
-        
-        if not interfaces:
-            console.print("[red]No wireless interfaces found![/red]")
-            return None
-        
-        # Create selection table
-        table = Table(title="Available Wireless Interfaces")
-        table.add_column("Option", style="cyan", justify="right")
-        table.add_column("Interface", style="green")
-        
-        for i, interface in enumerate(interfaces, 1):
-            table.add_row(str(i), interface)
-        
-        console.print(table)
-        
-        while True:
-            try:
-                choice = int(input("\nSelect interface: "))
-                if 1 <= choice <= len(interfaces):
-                    return interfaces[choice-1]
-                else:
-                    console.print("[red]Invalid choice. Please try again.[/red]")
-            except ValueError:
-                console.print("[red]Invalid input. Please enter a number.[/red]")
-        
-    except Exception as e:
-        console.print(f"[red]Error getting wireless interfaces: {str(e)}[/red]")
-        return None
-
-def check_wireless_tools():
-    """Check if required wireless tools are available"""
-    required_tools = ['iwconfig', 'airmon-ng', 'airodump-ng', 'aireplay-ng']
-    missing_tools = []
-    
-    for tool in required_tools:
-        try:
-            subprocess.run([tool, '--help'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except FileNotFoundError:
-            missing_tools.append(tool)
-    
-    if missing_tools:
-        console.print(f"[red]Missing required tools: {', '.join(missing_tools)}[/red]")
-        console.print("[yellow]Please install aircrack-ng and wireless-tools packages.[/yellow]")
-        return False
-    
-    return True
-
 def get_temp_path(filename):
     """Get path for temporary files in the data directory"""
     return get_data_path('temp', filename)
@@ -341,4 +246,88 @@ def cleanup_temp_files():
             except Exception as e:
                 console.print(f"[red]Error removing file {file_path}: {str(e)}[/red]")
     except Exception as e:
-        console.print(f"[red]Error cleaning temporary files: {str(e)}[/red]") 
+        console.print(f"[red]Error cleaning temporary files: {str(e)}[/red]")
+
+def get_interface():
+    """Get wireless interface from user"""
+    try:
+        # Get available interfaces
+        interfaces = []
+        result = subprocess.run(['iwconfig'], capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                if 'IEEE 802.11' in line:
+                    interface = line.split()[0]
+                    interfaces.append(interface)
+        
+        if not interfaces:
+            # Try alternative method
+            for iface in os.listdir('/sys/class/net'):
+                if os.path.exists(f'/sys/class/net/{iface}/wireless'):
+                    interfaces.append(iface)
+        
+        if not interfaces:
+            console.print("[red]No wireless interfaces found![/red]")
+            return None
+        
+        # If only one interface, use it
+        if len(interfaces) == 1:
+            console.print(f"[green]Using wireless interface: {interfaces[0]}[/green]")
+            return interfaces[0]
+        
+        # Let user select interface
+        console.print("\n[cyan]Available wireless interfaces:[/cyan]")
+        for i, iface in enumerate(interfaces, 1):
+            console.print(f"{i}. {iface}")
+        
+        while True:
+            try:
+                choice = int(input("\nSelect interface number: "))
+                if 1 <= choice <= len(interfaces):
+                    return interfaces[choice - 1]
+            except ValueError:
+                pass
+            console.print("[red]Invalid choice![/red]")
+        
+    except Exception as e:
+        console.print(f"[red]Error getting wireless interface: {str(e)}[/red]")
+        return None
+
+def setup_monitor_mode(interface):
+    """Enable monitor mode on interface"""
+    try:
+        # Kill interfering processes
+        subprocess.run(['airmon-ng', 'check', 'kill'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1)
+        
+        # Try multiple methods to enable monitor mode
+        methods = [
+            ['airmon-ng', 'start', interface],
+            ['iw', 'dev', interface, 'set', 'monitor', 'none'],
+            ['iwconfig', interface, 'mode', 'monitor']
+        ]
+        
+        for method in methods:
+            try:
+                subprocess.run(method, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(2)
+                
+                # Verify monitor mode
+                result = subprocess.run(['iwconfig', interface], capture_output=True, text=True)
+                if 'Mode:Monitor' in result.stdout:
+                    return interface
+                
+                # Check if interface name changed (e.g., wlan0mon)
+                mon_interface = interface + 'mon'
+                if os.path.exists(f'/sys/class/net/{mon_interface}'):
+                    return mon_interface
+            except:
+                continue
+        
+        console.print("[red]Failed to enable monitor mode![/red]")
+        return None
+        
+    except Exception as e:
+        console.print(f"[red]Error setting up monitor mode: {str(e)}[/red]")
+        return None 

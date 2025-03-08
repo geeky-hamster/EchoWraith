@@ -10,14 +10,14 @@ import os
 import json
 from datetime import datetime
 from modules.utils import (
-    check_wireless_tools,
-    get_interface,
-    setup_monitor_mode,
     get_data_path,
     log_activity,
     get_temp_path,
     cleanup_temp_files
 )
+from modules import InterfaceManager
+
+console = Console()
 
 class NetworkScanner:
     def __init__(self):
@@ -161,106 +161,212 @@ class NetworkScanner:
     def start_scan(self):
         """Start network scanning"""
         try:
-            # Check requirements
-            if not check_wireless_tools():
+            # Get interface and ensure monitor mode
+            if not InterfaceManager.ensure_monitor_mode():
+                self.console.print("[red]Failed to set monitor mode. Aborting scan.[/red]")
                 return
 
-            # Get wireless interface
-            self.interface = get_interface()
+            self.interface = InterfaceManager.get_current_interface()
             if not self.interface:
+                self.console.print("[red]No wireless interface available.[/red]")
                 return
 
-            # Enable monitor mode
-            self.console.print("\n[yellow]Enabling monitor mode...[/yellow]")
-            self.interface = setup_monitor_mode(self.interface)
-            if not self.interface:
-                self.console.print("[red]Failed to enable monitor mode![/red]")
-                return
+            # Create scan output file
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            output_file = get_data_path('scans', f'scan_{timestamp}')
 
-            self.console.print("[green]Monitor mode enabled successfully![/green]")
-            self.console.print(f"[cyan]Using interface: {self.interface}[/cyan]")
+            # Start airodump-ng scan
+            self.console.print(f"\n[cyan]Starting network scan with {self.interface}...[/cyan]")
+            self.console.print(f"[yellow]Scan will run for {self.scan_time} seconds[/yellow]\n")
 
-            # Start scanning
-            self.console.print("\n[yellow]Starting network scan...[/yellow]")
-            networks = self.scan_networks()
+            with Progress() as progress:
+                scan_task = progress.add_task("[cyan]Scanning...", total=self.scan_time)
 
-            if not networks:
-                self.console.print("[yellow]No networks found in range.[/yellow]")
-                return
+                # Start airodump-ng in background
+                scan_proc = subprocess.Popen(
+                    [
+                        'airodump-ng',
+                        '--write', output_file,
+                        '--output-format', 'csv',
+                        self.interface
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
 
-            # Display final results
-            self.display_networks(networks)
+                # Show progress bar during scan
+                while not progress.finished:
+                    time.sleep(1)
+                    progress.update(scan_task, advance=1)
 
-            # Save detailed results
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            save_path = get_data_path('scans', f'scan_{timestamp}')
-            
-            # Save JSON format for machine processing
-            with open(f"{save_path}.json", 'w') as f:
-                # Convert sets to lists for JSON serialization
-                networks_json = []
-                for network in networks:
-                    network_copy = network.copy()
-                    network_copy['clients'] = [json.loads(client) for client in network['clients']]
-                    networks_json.append(network_copy)
-                json.dump(networks_json, f, indent=4)
+                # Stop airodump-ng
+                scan_proc.terminate()
 
-            # Save human-readable format
-            with open(f"{save_path}.txt", 'w') as f:
-                f.write("Network Scan Results\n")
-                f.write("===================\n\n")
-                f.write(f"Scan Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Interface: {self.interface}\n")
-                f.write(f"Duration: {self.scan_time} seconds\n")
-                f.write(f"Networks Found: {len(networks)}\n\n")
-
-                for i, network in enumerate(sorted(networks, key=lambda x: int(x.get('power', '0') or '0'), reverse=True), 1):
-                    f.write(f"Network {i}\n")
-                    f.write("-" * 50 + "\n")
-                    f.write(f"ESSID: {network['essid'] or '<hidden>'}\n")
-                    f.write(f"BSSID: {network['bssid']}\n")
-                    f.write(f"Channel: {network['channel']}\n")
-                    f.write(f"Signal Strength: {network['power']} dBm\n")
-                    f.write(f"Speed: {network['speed']} MB/s\n")
-                    f.write(f"Privacy: {network['privacy']}\n")
-                    f.write(f"Cipher: {network['cipher']}\n")
-                    f.write(f"Authentication: {network['authentication']}\n")
-                    f.write(f"First Seen: {network['first_seen']}\n")
-                    f.write(f"Last Seen: {network['last_seen']}\n")
-                    f.write(f"Beacons: {network['beacons']}\n")
-                    f.write(f"Data Packets: {network['iv']}\n")
-                    if network['lan_ip']:
-                        f.write(f"LAN IP: {network['lan_ip']}\n")
-                    
-                    if network['clients']:
-                        f.write("\nConnected Clients:\n")
-                        for client_json in network['clients']:
-                            client = json.loads(client_json)
-                            f.write(f"\n  Client MAC: {client['mac']}\n")
-                            f.write(f"  First Seen: {client['first_seen']}\n")
-                            f.write(f"  Last Seen: {client['last_seen']}\n")
-                            f.write(f"  Signal Strength: {client['power']} dBm\n")
-                            f.write(f"  Packets: {client['packets']}\n")
-                            if client['probed_essids']:
-                                f.write("  Probed Networks:\n")
-                                for essid in client['probed_essids']:
-                                    f.write(f"    - {essid}\n")
-                    f.write("\n")
-
-            self.console.print(f"\n[green]Detailed scan results saved to:[/green]")
-            self.console.print(f"[cyan]- {save_path}.txt[/cyan] (Human readable)")
-            self.console.print(f"[cyan]- {save_path}.json[/cyan] (Machine readable)")
-            log_activity(f"Network scan completed - Found {len(networks)} networks")
+            # Parse and display results
+            csv_file = f"{output_file}-01.csv"
+            if os.path.exists(csv_file):
+                self.parse_results(csv_file)
+                self.display_results()
+            else:
+                self.console.print("[red]No scan results found![/red]")
 
         except Exception as e:
-            self.console.print(f"[red]Error during scan: {str(e)}[/red]")
-
+            self.console.print(f"[red]Error during network scan: {str(e)}[/red]")
         finally:
-            # Cleanup
-            try:
-                subprocess.run(['airmon-ng', 'stop', self.interface],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
-            except:
-                pass
-            pass 
+            # Clean up temporary files
+            for ext in ['-01.csv', '-01.kismet.csv', '-01.kismet.netxml', '-01.log.csv']:
+                temp_file = f"{output_file}{ext}"
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+
+    def parse_results(self, csv_file):
+        """Parse airodump-ng CSV output"""
+        try:
+            networks = []
+            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+
+            # Find the split between networks and clients
+            split_index = 0
+            for i, line in enumerate(lines):
+                if line.strip() == '':
+                    split_index = i
+                    break
+
+            # Parse networks
+            if split_index > 0:
+                headers = [h.strip() for h in lines[0].split(',')]
+                for line in lines[1:split_index]:
+                    if line.strip():
+                        data = [d.strip() for d in line.split(',')]
+                        if len(data) >= 13:  # Ensure we have enough fields
+                            network = {
+                                'bssid': data[0],
+                                'essid': data[13].strip() or '<hidden>',
+                                'channel': data[3],
+                                'power': data[8],
+                                'encryption': data[5],
+                                'clients': 0
+                            }
+                            networks.append(network)
+
+            # Count clients for each network
+            if len(lines) > split_index + 2:
+                for line in lines[split_index + 2:]:
+                    if line.strip():
+                        data = [d.strip() for d in line.split(',')]
+                        if len(data) >= 6:  # Ensure we have enough fields
+                            bssid = data[5]
+                            for network in networks:
+                                if network['bssid'] == bssid:
+                                    network['clients'] += 1
+
+            self.networks = networks
+
+        except Exception as e:
+            self.console.print(f"[red]Error parsing scan results: {str(e)}[/red]")
+
+    def display_results(self):
+        """Display scan results in a table"""
+        if not self.networks:
+            self.console.print("[yellow]No networks found.[/yellow]")
+            return
+
+        # Create results table
+        table = Table(
+            title="Discovered Networks",
+            show_header=True,
+            header_style="bold magenta",
+            border_style="cyan"
+        )
+
+        # Add columns
+        table.add_column("BSSID", style="cyan")
+        table.add_column("ESSID", style="green")
+        table.add_column("Channel", justify="center")
+        table.add_column("Power", justify="right")
+        table.add_column("Encryption", style="yellow")
+        table.add_column("Clients", justify="center")
+
+        # Add network data
+        for network in sorted(self.networks, key=lambda x: int(x['power'] or 0), reverse=True):
+            table.add_row(
+                network['bssid'],
+                network['essid'],
+                network['channel'],
+                network['power'],
+                network['encryption'],
+                str(network['clients'])
+            )
+
+        self.console.print(table)
+        self.console.print(f"\n[green]Found {len(self.networks)} networks[/green]")
+
+        # Save detailed results
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = get_data_path('scans', f'scan_{timestamp}')
+        
+        # Save JSON format for machine processing
+        with open(f"{save_path}.json", 'w') as f:
+            # Convert sets to lists for JSON serialization
+            networks_json = []
+            for network in self.networks:
+                network_copy = network.copy()
+                network_copy['clients'] = [json.loads(client) for client in network['clients']]
+                networks_json.append(network_copy)
+            json.dump(networks_json, f, indent=4)
+
+        # Save human-readable format
+        with open(f"{save_path}.txt", 'w') as f:
+            f.write("Network Scan Results\n")
+            f.write("===================\n\n")
+            f.write(f"Scan Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Interface: {self.interface}\n")
+            f.write(f"Duration: {self.scan_time} seconds\n")
+            f.write(f"Networks Found: {len(self.networks)}\n\n")
+
+            for i, network in enumerate(sorted(self.networks, key=lambda x: int(x.get('power', '0') or '0'), reverse=True), 1):
+                f.write(f"Network {i}\n")
+                f.write("-" * 50 + "\n")
+                f.write(f"ESSID: {network['essid'] or '<hidden>'}\n")
+                f.write(f"BSSID: {network['bssid']}\n")
+                f.write(f"Channel: {network['channel']}\n")
+                f.write(f"Signal Strength: {network['power']} dBm\n")
+                if 'speed' in network:
+                    f.write(f"Speed: {network['speed']} MB/s\n")
+                if 'privacy' in network:
+                    f.write(f"Privacy: {network['privacy']}\n")
+                if 'cipher' in network:
+                    f.write(f"Cipher: {network['cipher']}\n")
+                if 'authentication' in network:
+                    f.write(f"Authentication: {network['authentication']}\n")
+                if 'first_seen' in network:
+                    f.write(f"First Seen: {network['first_seen']}\n")
+                if 'last_seen' in network:
+                    f.write(f"Last Seen: {network['last_seen']}\n")
+                if 'beacons' in network:
+                    f.write(f"Beacons: {network['beacons']}\n")
+                if 'iv' in network:
+                    f.write(f"Data Packets: {network['iv']}\n")
+                if 'lan_ip' in network and network['lan_ip']:
+                    f.write(f"LAN IP: {network['lan_ip']}\n")
+                
+                if network['clients']:
+                    f.write("\nConnected Clients:\n")
+                    for client_json in network['clients']:
+                        client = json.loads(client_json)
+                        f.write(f"\n  Client MAC: {client['mac']}\n")
+                        f.write(f"  First Seen: {client['first_seen']}\n")
+                        f.write(f"  Last Seen: {client['last_seen']}\n")
+                        f.write(f"  Signal Strength: {client['power']} dBm\n")
+                        f.write(f"  Packets: {client['packets']}\n")
+                        if client['probed_essids']:
+                            f.write("  Probed Networks:\n")
+                            for essid in client['probed_essids']:
+                                f.write(f"    - {essid}\n")
+                f.write("\n")
+
+        self.console.print(f"\n[green]Detailed scan results saved to:[/green]")
+        self.console.print(f"[cyan]- {save_path}.txt[/cyan] (Human readable)")
+        self.console.print(f"[cyan]- {save_path}.json[/cyan] (Machine readable)")
+        log_activity(f"Network scan completed - Found {len(self.networks)} networks") 

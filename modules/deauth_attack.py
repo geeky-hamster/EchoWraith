@@ -8,10 +8,7 @@ import threading
 import time
 import os
 import subprocess
-from modules.utils import (
-    check_wireless_tools,
-    get_interface,
-    setup_monitor_mode,
+from .utils import (
     scan_networks,
     select_target,
     get_data_path,
@@ -19,6 +16,7 @@ from modules.utils import (
     get_temp_path,
     cleanup_temp_files
 )
+from .interface_manager import InterfaceManager
 from rich.table import Table
 from datetime import datetime
 from threading import Thread
@@ -108,23 +106,15 @@ class DeauthAttacker:
     def start_attack(self):
         """Start deauthentication attack"""
         try:
-            # Check requirements
-            if not check_wireless_tools():
+            # Get interface and ensure monitor mode
+            if not InterfaceManager.ensure_monitor_mode():
+                self.console.print("[red]Failed to set monitor mode. Aborting attack.[/red]")
                 return
 
-            # Get wireless interface
-            self.interface = get_interface()
+            self.interface = InterfaceManager.get_current_interface()
             if not self.interface:
+                self.console.print("[red]No wireless interface available.[/red]")
                 return
-
-            # Enable monitor mode
-            self.console.print("\n[yellow]Enabling monitor mode...[/yellow]")
-            self.interface = setup_monitor_mode(self.interface)
-            if not self.interface:
-                self.console.print("[red]Failed to enable monitor mode![/red]")
-                return
-
-            self.console.print("[green]Monitor mode enabled successfully![/green]")
 
             # Get target information
             if not self._get_target_info():
@@ -184,14 +174,8 @@ class DeauthAttacker:
         finally:
             # Cleanup
             self.running = False
-            try:
-                subprocess.run(['airmon-ng', 'stop', self.interface],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
-            except:
-                pass
-
-            pass  # Replaced "input('\nPress Enter to continue...')" with pass
+            # Let InterfaceManager handle mode switching
+            InterfaceManager.restore_managed_mode()
 
     def send_deauth_packets(self):
         """Send deauthentication packets with improved reliability and continuous blocking"""

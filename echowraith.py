@@ -14,7 +14,8 @@ from modules.network_scanner import NetworkScanner
 from modules.deauth_attack import DeauthAttacker
 from modules.wps_attack import WPSAttacker
 from modules.handshake_capture import HandshakeCapture
-from modules.utils import setup_workspace, cleanup_workspace, log_activity, check_wireless_tools
+from modules.utils import setup_workspace, cleanup_workspace, log_activity
+from modules import session, InterfaceManager
 
 console = Console()
 
@@ -29,11 +30,22 @@ class EchoWraith:
             '5': ('Handshake Capture', self.capture_handshake, '✨ Advanced WPA/WPA2 handshake capture with auto password cracking'),
             '6': ('View History', self.view_history, 'View previous session results'),
             '7': ('Clean Workspace', self.clean_workspace, 'Delete all created files and directories'),
-            '8': ('Exit', self.exit_program, 'Exit EchoWraith')
+            '8': ('Change Interface', self.change_interface, 'Change wireless interface'),
+            '9': ('Exit', self.exit_program, 'Exit EchoWraith')
         }
         self.directories = setup_workspace()
         if not self.directories:
             console.print("[red]Failed to setup workspace. Some features may not work correctly.[/red]")
+
+    def change_interface(self):
+        """Change the wireless interface"""
+        session.clear_session()
+        interface = InterfaceManager.get_current_interface()
+        if interface:
+            console.print(f"[green]Successfully switched to interface: {interface}[/green]")
+        else:
+            console.print("[red]Failed to select interface[/red]")
+        input("\nPress Enter to continue...")
 
     def perform_system_check(self):
         """Perform comprehensive system check"""
@@ -70,57 +82,43 @@ class EchoWraith:
                 else:
                     self.console.print(f"[red]❌ {description} ({tool}): Not found[/red]")
                     checks_passed = False
-            
-            # Check wireless interfaces
-            interfaces = []
-            result = subprocess.run(['iwconfig'], capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                for line in result.stdout.split('\n'):
-                    if 'IEEE 802.11' in line:
-                        iface = line.split()[0]
-                        interfaces.append(iface)
-                        
-                        # Check interface capabilities
-                        self.console.print(f"\n[cyan]Checking capabilities for {iface}:[/cyan]")
-                        
-                        # Check monitor mode support
-                        monitor_support = False
-                        iw_info = subprocess.run(['iwconfig', iface], capture_output=True, text=True)
-                        if 'Mode:Monitor' in iw_info.stdout or 'Mode:Auto' in iw_info.stdout:
-                            monitor_support = True
-                        
-                        if monitor_support:
-                            self.console.print(f"[green]✓ {iface} supports monitor mode[/green]")
-                        else:
-                            self.console.print(f"[yellow]⚠ {iface} monitor mode support unclear[/yellow]")
-                        
-                        # Check supported bands and channels
-                        try:
-                            iw_info = subprocess.run(['iwlist', iface, 'frequency'], capture_output=True, text=True)
-                            if '2.4 GHz' in iw_info.stdout:
-                                self.console.print(f"[green]✓ {iface} supports 2.4 GHz band[/green]")
-                            if '5.0 GHz' in iw_info.stdout:
-                                self.console.print(f"[green]✓ {iface} supports 5 GHz band[/green]")
-                        except:
-                            self.console.print(f"[yellow]⚠ Could not determine frequency bands for {iface}[/yellow]")
-                        
-                        # Check TX power capabilities
-                        try:
-                            iw_info = subprocess.run(['iwlist', iface, 'txpower'], capture_output=True, text=True)
-                            if 'Current Tx-Power' in iw_info.stdout:
-                                self.console.print(f"[green]✓ {iface} supports TX power adjustment[/green]")
-                        except:
-                            self.console.print(f"[yellow]⚠ Could not determine TX power capabilities for {iface}[/yellow]")
+
+            # Get and check wireless interface
+            interface = InterfaceManager.get_current_interface()
+            if interface:
+                self.console.print(f"\n[cyan]Checking capabilities for {interface}:[/cyan]")
                 
-                if interfaces:
-                    self.console.print(f"\n[green]✓ Found {len(interfaces)} wireless interface(s)[/green]")
+                # Check monitor mode support
+                monitor_support = False
+                iw_info = subprocess.run(['iwconfig', interface], capture_output=True, text=True)
+                if 'Mode:Monitor' in iw_info.stdout or 'Mode:Auto' in iw_info.stdout:
+                    monitor_support = True
+                
+                if monitor_support:
+                    self.console.print(f"[green]✓ {interface} supports monitor mode[/green]")
                 else:
-                    self.console.print("[red]❌ No wireless interfaces found![/red]")
-                    self.console.print("[yellow]Please connect a compatible wireless adapter[/yellow]")
-                    checks_passed = False
+                    self.console.print(f"[yellow]⚠ {interface} monitor mode support unclear[/yellow]")
+                
+                # Check supported bands and channels
+                try:
+                    iw_info = subprocess.run(['iwlist', interface, 'frequency'], capture_output=True, text=True)
+                    if '2.4 GHz' in iw_info.stdout:
+                        self.console.print(f"[green]✓ {interface} supports 2.4 GHz band[/green]")
+                    if '5.0 GHz' in iw_info.stdout:
+                        self.console.print(f"[green]✓ {interface} supports 5 GHz band[/green]")
+                except:
+                    self.console.print(f"[yellow]⚠ Could not determine frequency bands for {interface}[/yellow]")
+                
+                # Check TX power capabilities
+                try:
+                    iw_info = subprocess.run(['iwlist', interface, 'txpower'], capture_output=True, text=True)
+                    if 'Current Tx-Power' in iw_info.stdout:
+                        self.console.print(f"[green]✓ {interface} supports TX power adjustment[/green]")
+                except:
+                    self.console.print(f"[yellow]⚠ Could not determine TX power capabilities for {interface}[/yellow]")
             else:
-                self.console.print("[red]❌ Error checking wireless interfaces[/red]")
+                self.console.print("[red]❌ No wireless interfaces found![/red]")
+                self.console.print("[yellow]Please connect a compatible wireless adapter[/yellow]")
                 checks_passed = False
             
             # Check workspace directories
@@ -182,8 +180,9 @@ class EchoWraith:
     def network_scan(self):
         """Start network scanning"""
         try:
-            # Check wireless tools first
-            if not check_wireless_tools():
+            # Check if we have a valid interface
+            if not InterfaceManager.get_current_interface():
+                self.console.print("[red]No wireless interface selected![/red]")
                 return
 
             scanner = NetworkScanner()
@@ -195,8 +194,9 @@ class EchoWraith:
     def deauth_attack(self):
         """Start deauthentication attack"""
         try:
-            # Check wireless tools first
-            if not check_wireless_tools():
+            # Check if we have a valid interface
+            if not InterfaceManager.get_current_interface():
+                self.console.print("[red]No wireless interface selected![/red]")
                 return
 
             deauther = DeauthAttacker()
@@ -208,8 +208,9 @@ class EchoWraith:
     def wps_attack(self):
         """Start WPS security analysis"""
         try:
-            # Check wireless tools first
-            if not check_wireless_tools():
+            # Check if we have a valid interface
+            if not InterfaceManager.get_current_interface():
+                self.console.print("[red]No wireless interface selected![/red]")
                 return
 
             wps = WPSAttacker()
@@ -221,8 +222,9 @@ class EchoWraith:
     def capture_handshake(self):
         """Start handshake capture with automatic password cracking"""
         try:
-            # Check wireless tools first
-            if not check_wireless_tools():
+            # Check if we have a valid interface
+            if not InterfaceManager.get_current_interface():
+                self.console.print("[red]No wireless interface selected![/red]")
                 return
 
             handshake = HandshakeCapture()
@@ -304,11 +306,26 @@ class EchoWraith:
             self.console.print(f"[red]Error viewing history: {str(e)}[/red]")
 
     def exit_program(self):
+        """Clean up and exit the program"""
         self.console.print("[yellow]Cleaning up and exiting...[/yellow]")
+        
+        # Ensure interface is back in managed mode
+        interface = session.get_interface()
+        if interface:
+            try:
+                if not InterfaceManager.ensure_managed_mode():
+                    self.console.print("[yellow]Warning: Could not restore interface to managed mode[/yellow]")
+            except Exception as e:
+                self.console.print(f"[yellow]Warning: Error while restoring interface mode: {str(e)}[/yellow]")
+        
         # Cleanup any leftover processes
-        os.system('pkill aircrack-ng 2>/dev/null')
-        os.system('pkill airodump-ng 2>/dev/null')
-        os.system('pkill aireplay-ng 2>/dev/null')
+        try:
+            os.system('pkill aircrack-ng 2>/dev/null')
+            os.system('pkill airodump-ng 2>/dev/null')
+            os.system('pkill aireplay-ng 2>/dev/null')
+        except:
+            pass
+            
         log_activity("Toolkit session ended")
         sys.exit(0)
 
@@ -364,6 +381,17 @@ class EchoWraith:
 
         self.display_banner()
         
+        # Select interface at startup
+        interface = InterfaceManager.get_current_interface()
+        if not interface:
+            self.console.print("[yellow]No wireless interface selected. Initiating interface selection...[/yellow]")
+            interface = session.select_interface()  # This will prompt for interface selection
+            if not interface:
+                self.console.print("[red]No wireless interface available. Please connect a wireless adapter and try again.[/red]")
+                sys.exit(1)
+        
+        self.console.print(f"[green]Using wireless interface: {interface}[/green]")
+        
         # Perform mandatory system check at startup
         if not self.perform_system_check():
             self.console.print("\n[red]Critical system requirements not met. Please fix the issues and try again.[/red]")
@@ -384,8 +412,8 @@ class EchoWraith:
                 module_func()  # Run the selected module
                 
                 # Only prompt for Enter once after the task is completed
-                if choice != '8':  # If not exit
-                    input("\nPress Enter to return to the menu...")  # Change prompt message for clarity
+                if choice != '9':  # If not exit
+                    input("\nPress Enter to return to the menu...")
                 
             except KeyboardInterrupt:
                 self.console.print("\n[yellow]Operation cancelled by user[/yellow]")
