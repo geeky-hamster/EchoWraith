@@ -259,10 +259,10 @@ class HandshakeCapture:
                     TextColumn("[progress.description]{task.description}"),
                     TimeElapsedColumn(),
                 ) as progress:
-                    task = progress.add_task("[cyan]Waiting for handshake...", total=25)
+                    task = progress.add_task("[cyan]Waiting for handshake...", total=100)
                     
-                    # Wait for 2.5 seconds, checking for handshake
-                    for _ in range(25):
+                    # Wait for 10 seconds, checking for handshake
+                    for _ in range(100):
                         if self.verify_handshake():
                             self.console.print("\n[green]Handshake captured![/green]")
                             capture_process.terminate()
@@ -298,10 +298,10 @@ class HandshakeCapture:
                     TextColumn("[progress.description]{task.description}"),
                     TimeElapsedColumn(),
                 ) as progress:
-                    task = progress.add_task("[cyan]Waiting for handshake...", total=25)
+                    task = progress.add_task("[cyan]Waiting for handshake...", total=100)
                     
-                    # Wait for 2.5 seconds, checking for handshake
-                    for _ in range(25):
+                    # Wait for 10 seconds, checking for handshake
+                    for _ in range(100):
                         if self.verify_handshake():
                             self.console.print("\n[green]Handshake captured![/green]")
                             capture_process.terminate()
