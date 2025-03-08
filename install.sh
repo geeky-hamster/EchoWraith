@@ -54,14 +54,36 @@ elif [ "$PKG_MANAGER" = "dnf" ]; then
     dnf check-update
 fi
 
-# Install required packages
-echo -e "${YELLOW}Installing required packages...${NC}"
+# Required system dependencies:
+# - python3: Main interpreter
+# - python3-pip/python-pip: Package manager
+# - python3-venv/python-virtualenv: Environment isolation
+# - aircrack-ng: Wireless security auditing
+# - reaver: WPS attack utility
+# - iw: For wireless interface management
+# - wireless-tools: Collection of tools for wireless management
+
+echo -e "${YELLOW}Installing required system packages...${NC}"
 if [ "$PKG_MANAGER" = "apt-get" ]; then
-    apt-get install -y python3 python3-pip python3-venv aircrack-ng reaver
+    apt-get install -y python3 python3-pip python3-venv aircrack-ng reaver iw wireless-tools
 elif [ "$PKG_MANAGER" = "pacman" ]; then
-    pacman -S --noconfirm python python-pip python-virtualenv aircrack-ng reaver
+    pacman -S --noconfirm python python-pip python-virtualenv aircrack-ng reaver iw wireless_tools
 elif [ "$PKG_MANAGER" = "dnf" ]; then
-    dnf install -y python3 python3-pip python3-virtualenv aircrack-ng reaver
+    dnf install -y python3 python3-pip python3-virtualenv aircrack-ng reaver iw wireless-tools
+fi
+
+# Check for wireless adapter
+echo -e "${YELLOW}Checking for wireless adapters...${NC}"
+if ! command -v iw &> /dev/null; then
+    echo -e "${RED}Warning: 'iw' command not found. Unable to check wireless adapters.${NC}"
+else
+    INTERFACES=$(iw dev | grep Interface | wc -l)
+    if [ "$INTERFACES" -eq 0 ]; then
+        echo -e "${RED}Warning: No wireless interfaces detected. EchoWraith requires a compatible wireless adapter.${NC}"
+        echo -e "${YELLOW}You can still install the tool, but it may not function properly without a wireless adapter.${NC}"
+    else
+        echo -e "${GREEN}Found ${INTERFACES} wireless interface(s).${NC}"
+    fi
 fi
 
 # Create installation directory
@@ -87,7 +109,18 @@ source "$VENV_DIR/bin/activate"
 # Install Python dependencies
 echo -e "${YELLOW}Installing Python dependencies...${NC}"
 "$VENV_DIR/bin/pip" install --upgrade pip
-"$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+
+# Check if requirements.txt exists
+if [ -f "$INSTALL_DIR/requirements.txt" ]; then
+    echo -e "${GREEN}Installing dependencies from requirements.txt...${NC}"
+    "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+else
+    echo -e "${YELLOW}requirements.txt not found. Installing core dependencies...${NC}"
+    # Core dependencies required by EchoWraith
+    "$VENV_DIR/bin/pip" install rich>=13.7.0 scapy>=2.5.0 netifaces>=0.11.0 cryptography>=41.0.0 \
+        pyroute2>=0.7.9 netaddr>=0.8.0 prompt_toolkit>=3.0.43 pycryptodomex>=3.19.0
+    echo -e "${YELLOW}Note: Some functionality may be limited without full dependency set.${NC}"
+fi
 
 # Create executable
 echo -e "${YELLOW}Creating executable...${NC}"
@@ -115,4 +148,12 @@ chmod -R 755 "$INSTALL_DIR"
 echo -e "${GREEN}Installation complete!${NC}"
 echo -e "${YELLOW}You can now run EchoWraith by typing: ${GREEN}sudo echowraith${NC}"
 echo -e "${BLUE}Installation directory: ${GREEN}$INSTALL_DIR${NC}"
-echo -e "${YELLOW}Note: Make sure your wireless adapter supports monitor mode${NC}" 
+echo -e "${YELLOW}Note: Make sure your wireless adapter supports monitor mode${NC}"
+
+# Verify installation
+echo -e "${YELLOW}Verifying installation...${NC}"
+if [ -f "/usr/local/bin/echowraith" ] && [ -d "$INSTALL_DIR" ]; then
+    echo -e "${GREEN}✓ EchoWraith is successfully installed.${NC}"
+else
+    echo -e "${RED}× There was a problem with the installation.${NC}"
+fi 

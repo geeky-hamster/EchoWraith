@@ -1,8 +1,35 @@
-rich>=13.7.0
-scapy>=2.5.0
+# Core Dependencies
+rich>=13.7.1
+scapy>=2.6.1
 netifaces>=0.11.0
-cryptography>=41.0.0
+cryptography>=43.0.0
 pyroute2>=0.7.9
-netaddr>=0.8.0
-prompt_toolkit>=3.0.43
-pycryptodomex>=3.19.0 
+netaddr>=0.10.1
+prompt_toolkit>=3.0.48
+pycryptodomex>=3.20.0
+
+# Network Analysis
+aiodns>=3.2.0
+aiohttp>=3.10.10
+requests>=2.32.3
+paramiko>=3.4.1
+
+# UI and Console
+colorama>=0.4.6
+pyfiglet>=1.0.2
+termcolor>=2.4.0
+tqdm>=4.67.0
+
+# Data Processing
+PyYAML>=6.0.2
+python-dateutil>=2.9.0
+
+# Security Tools
+pyOpenSSL>=24.2.1
+bcrypt>=4.2.0
+
+# Optional Dependencies
+matplotlib>=3.8.3  # For signal visualization
+numpy>=1.26.4     # Required for data analysis
+pandas>=2.2.3     # For data manipulation
+sqlalchemy>=2.0.32  # For database operations
