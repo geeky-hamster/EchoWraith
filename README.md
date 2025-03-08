@@ -87,6 +87,33 @@ chmod +x echowraith.py
 sudo ln -s $(pwd)/echowraith.py /usr/local/bin/echowraith
 ```
 
+6. Verify installation:
+```bash
+# Verify EchoWraith is accessible
+which echowraith
+
+# Check version and dependencies
+sudo echowraith --version
+```
+
+7. Create necessary directories:
+```bash
+# Create workspace directory
+mkdir -p ~/.echowraith/{logs,captures,wordlists}
+
+# Set proper permissions
+chmod 755 ~/.echowraith
+chmod 700 ~/.echowraith/{logs,captures,wordlists}
+```
+
+8. (Optional) Download common wordlists:
+```bash
+# Download and extract common wordlists
+cd ~/.echowraith/wordlists
+wget https://github.com/praetorian-inc/Hob0Rules/raw/master/wordlists/rockyou.txt.gz
+gzip -d rockyou.txt.gz
+```
+
 ## 🎮 Usage
 
 1. Start EchoWraith:
