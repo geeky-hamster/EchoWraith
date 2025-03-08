@@ -157,4 +157,9 @@ class InterfaceManager:
 
         except Exception as e:
             console.print(f"[red]Error restoring managed mode: {str(e)}[/red]")
-            return False 
+            return False
+
+    @staticmethod
+    def restore_managed_mode():
+        """Restore interface to managed mode"""
+        return InterfaceManager.ensure_managed_mode() 

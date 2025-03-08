@@ -27,7 +27,7 @@ class EchoWraith:
             '2': ('Network Scanner', self.network_scan, 'Discover and analyze nearby WiFi networks'),
             '3': ('Deauthentication', self.deauth_attack, 'Disconnect clients from target networks'),
             '4': ('WPS Analysis', self.wps_attack, 'Test WPS security'),
-            '5': ('Handshake Capture', self.capture_handshake, '✨ Advanced WPA/WPA2 handshake capture with auto password cracking'),
+            '5': ('Handshake Capture', self.capture_handshake, 'Advanced WPA/WPA2 handshake capture with auto password cracking'),
             '6': ('View History', self.view_history, 'View previous session results'),
             '7': ('Clean Workspace', self.clean_workspace, 'Delete all created files and directories'),
             '8': ('Change Interface', self.change_interface, 'Change wireless interface'),
@@ -36,6 +36,15 @@ class EchoWraith:
         self.directories = setup_workspace()
         if not self.directories:
             console.print("[red]Failed to setup workspace. Some features may not work correctly.[/red]")
+        
+        # Enable monitor mode on startup
+        interface = InterfaceManager.get_current_interface()
+        if interface:
+            console.print("\n[cyan]Enabling monitor mode...[/cyan]")
+            if InterfaceManager.ensure_monitor_mode():
+                console.print(f"[green]Successfully enabled monitor mode on {interface}[/green]")
+            else:
+                console.print(f"[red]Failed to enable monitor mode on {interface}[/red]")
 
     def change_interface(self):
         """Change the wireless interface"""
@@ -307,16 +316,25 @@ class EchoWraith:
 
     def exit_program(self):
         """Clean up and exit the program"""
-        self.console.print("[yellow]Cleaning up and exiting...[/yellow]")
+        self.console.print("[yellow]Preparing to exit...[/yellow]")
         
-        # Ensure interface is back in managed mode
-        interface = session.get_interface()
-        if interface:
-            try:
-                if not InterfaceManager.ensure_managed_mode():
-                    self.console.print("[yellow]Warning: Could not restore interface to managed mode[/yellow]")
-            except Exception as e:
-                self.console.print(f"[yellow]Warning: Error while restoring interface mode: {str(e)}[/yellow]")
+        # Check if interface is in monitor mode and prompt user
+        interface = InterfaceManager.get_current_interface()
+        if interface and InterfaceManager.get_interface_mode() == 'monitor':
+            choice = Prompt.ask(
+                "\nInterface is in monitor mode. Do you want to restore it to managed mode?",
+                choices=["yes", "no"],
+                default="yes"
+            )
+            
+            if choice.lower() == "yes":
+                self.console.print("[cyan]Restoring interface to managed mode...[/cyan]")
+                if InterfaceManager.ensure_managed_mode():
+                    self.console.print(f"[green]Successfully restored {interface} to managed mode[/green]")
+                else:
+                    self.console.print(f"[red]Failed to restore {interface} to managed mode[/red]")
+            else:
+                self.console.print("[yellow]Leaving interface in monitor mode as requested[/yellow]")
         
         # Cleanup any leftover processes
         try:

