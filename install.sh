@@ -10,6 +10,7 @@ NC='\033[0m'
 # Installation directory
 INSTALL_DIR="/opt/echowraith"
 VENV_DIR="$INSTALL_DIR/venv"
+WORDLISTS_DIR="$INSTALL_DIR/data/wordlists"
 
 # Banner
 echo -e "${GREEN}
@@ -62,14 +63,16 @@ fi
 # - reaver: WPS attack utility
 # - iw: For wireless interface management
 # - wireless-tools: Collection of tools for wireless management
+# - wget: For downloading wordlists
+# - p7zip-full: For extracting wordlists
 
 echo -e "${YELLOW}Installing required system packages...${NC}"
 if [ "$PKG_MANAGER" = "apt-get" ]; then
-    apt-get install -y python3 python3-pip python3-venv aircrack-ng reaver iw wireless-tools
+    apt-get install -y python3 python3-pip python3-venv aircrack-ng reaver iw wireless-tools wget p7zip-full
 elif [ "$PKG_MANAGER" = "pacman" ]; then
-    pacman -S --noconfirm python python-pip python-virtualenv aircrack-ng reaver iw wireless_tools
+    pacman -S --noconfirm python python-pip python-virtualenv aircrack-ng reaver iw wireless_tools wget p7zip
 elif [ "$PKG_MANAGER" = "dnf" ]; then
-    dnf install -y python3 python3-pip python3-virtualenv aircrack-ng reaver iw wireless-tools
+    dnf install -y python3 python3-pip python3-virtualenv aircrack-ng reaver iw wireless-tools wget p7zip p7zip-plugins
 fi
 
 # Check for wireless adapter
@@ -90,6 +93,7 @@ fi
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/modules"
 mkdir -p "$INSTALL_DIR/data"
+mkdir -p "$WORDLISTS_DIR"
 
 # Download and extract files
 echo -e "${YELLOW}Downloading EchoWraith...${NC}"
@@ -122,6 +126,22 @@ else
     echo -e "${YELLOW}Note: Some functionality may be limited without full dependency set.${NC}"
 fi
 
+# Download and extract rockyou.txt
+echo -e "${YELLOW}Setting up wordlists...${NC}"
+if [ ! -f "$WORDLISTS_DIR/rockyou.txt" ]; then
+    echo -e "${BLUE}Downloading rockyou.txt...${NC}"
+    wget -q https://github.com/praetorian-inc/Hob0Rules/raw/master/wordlists/rockyou.txt.gz -O "$WORDLISTS_DIR/rockyou.txt.gz"
+    if [ $? -eq 0 ]; then
+        gunzip "$WORDLISTS_DIR/rockyou.txt.gz"
+        echo -e "${GREEN}Successfully downloaded and extracted rockyou.txt${NC}"
+    else
+        echo -e "${RED}Failed to download rockyou.txt. You can manually download it later.${NC}"
+        echo -e "${YELLOW}Place it in: $WORDLISTS_DIR/rockyou.txt${NC}"
+    fi
+else
+    echo -e "${GREEN}rockyou.txt already exists${NC}"
+fi
+
 # Create executable
 echo -e "${YELLOW}Creating executable...${NC}"
 cat > /usr/local/bin/echowraith << 'EOF'
@@ -148,12 +168,18 @@ chmod -R 755 "$INSTALL_DIR"
 echo -e "${GREEN}Installation complete!${NC}"
 echo -e "${YELLOW}You can now run EchoWraith by typing: ${GREEN}sudo echowraith${NC}"
 echo -e "${BLUE}Installation directory: ${GREEN}$INSTALL_DIR${NC}"
+echo -e "${BLUE}Wordlists directory: ${GREEN}$WORDLISTS_DIR${NC}"
 echo -e "${YELLOW}Note: Make sure your wireless adapter supports monitor mode${NC}"
 
 # Verify installation
 echo -e "${YELLOW}Verifying installation...${NC}"
 if [ -f "/usr/local/bin/echowraith" ] && [ -d "$INSTALL_DIR" ]; then
     echo -e "${GREEN}✓ EchoWraith is successfully installed.${NC}"
+    if [ -f "$WORDLISTS_DIR/rockyou.txt" ]; then
+        echo -e "${GREEN}✓ Wordlist is ready.${NC}"
+    else
+        echo -e "${YELLOW}⚠ Wordlist is missing. You may need to download it manually.${NC}"
+    fi
 else
     echo -e "${RED}× There was a problem with the installation.${NC}"
 fi 

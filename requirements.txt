@@ -27,6 +27,8 @@ python-dateutil>=2.9.0
 # Security Tools
 pyOpenSSL>=24.2.1
 bcrypt>=4.2.0
+wget>=3.2        # For downloading wordlists
+py7zr>=0.20.5    # For handling compressed wordlists
 
 # Optional Dependencies
 matplotlib>=3.8.3  # For signal visualization
