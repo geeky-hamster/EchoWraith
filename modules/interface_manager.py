@@ -121,36 +121,78 @@ class InterfaceManager:
             if InterfaceManager.get_interface_mode() == 'managed':
                 return True
 
-            # Kill interfering processes
+            console.print(f"[cyan]Current interface: {interface}[/cyan]")
+
+            # Kill interfering processes more thoroughly
             subprocess.run(['airmon-ng', 'check', 'kill'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(1)
+            subprocess.run(['pkill', 'wpa_supplicant'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['pkill', 'NetworkManager'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(2)
+
+            # If interface name ends with 'mon', try to use base name first
+            original_interface = interface
+            if interface.endswith('mon'):
+                base_interface = interface[:-3]
+                # Check if base interface exists
+                if os.path.exists(f'/sys/class/net/{base_interface}'):
+                    interface = base_interface
+                    InterfaceManager.set_current_interface(base_interface)
+                    console.print(f"[cyan]Using base interface: {base_interface}[/cyan]")
+
+            # First attempt: Stop monitor mode with airmon-ng
+            try:
+                subprocess.run(['airmon-ng', 'stop', original_interface], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(2)
+            except:
+                pass
+
+            # Second attempt: Try with the current interface name
+            try:
+                subprocess.run(['airmon-ng', 'stop', interface], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(2)
+            except:
+                pass
+
+            # Check available interfaces after stopping monitor mode
+            available = InterfaceManager.get_available_interfaces()
+            console.print(f"[cyan]Available interfaces after stop: {', '.join(available)}[/cyan]")
+
+            # If base interface is now available, use it
+            if interface in available:
+                console.print(f"[cyan]Found interface {interface} in available interfaces[/cyan]")
+            elif original_interface[:-3] in available:
+                interface = original_interface[:-3]
+                InterfaceManager.set_current_interface(interface)
+                console.print(f"[cyan]Switching to available interface: {interface}[/cyan]")
 
             # Try multiple methods to restore managed mode
             methods = [
-                ['airmon-ng', 'stop', interface],
+                ['ip', 'link', 'set', interface, 'down'],
                 ['iw', 'dev', interface, 'set', 'type', 'managed'],
+                ['ip', 'link', 'set', interface, 'up'],
                 ['iwconfig', interface, 'mode', 'managed']
             ]
 
             for method in methods:
                 try:
-                    subprocess.run(method, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(2)
+                    result = subprocess.run(method, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    time.sleep(1)
+                    if result.returncode == 0:
+                        console.print(f"[cyan]Successfully ran: {' '.join(method)}[/cyan]")
+                except Exception as e:
+                    console.print(f"[yellow]Failed to run {' '.join(method)}: {str(e)}[/yellow]")
 
-                    # If interface name ends with 'mon', try to use base name
-                    if interface.endswith('mon'):
-                        base_interface = interface[:-3]
-                        if os.path.exists(f'/sys/class/net/{base_interface}'):
-                            InterfaceManager.set_current_interface(base_interface)
-                            interface = base_interface
-
-                    # Verify managed mode
-                    result = subprocess.run(['iwconfig', interface], capture_output=True, text=True)
-                    if 'Mode:Managed' in result.stdout or 'Mode:Auto' in result.stdout:
-                        InterfaceManager.set_interface_mode('managed')
-                        return True
-                except:
-                    continue
+            # Final verification
+            try:
+                result = subprocess.run(['iwconfig', interface], capture_output=True, text=True)
+                if 'Mode:Managed' in result.stdout or 'Mode:Auto' in result.stdout:
+                    InterfaceManager.set_interface_mode('managed')
+                    console.print(f"[green]Successfully verified managed mode on {interface}[/green]")
+                    return True
+                else:
+                    console.print(f"[yellow]Interface mode after attempts: {result.stdout.split('Mode:')[1].split()[0] if 'Mode:' in result.stdout else 'unknown'}[/yellow]")
+            except Exception as e:
+                console.print(f"[red]Error verifying interface mode: {str(e)}[/red]")
 
             console.print("[red]Failed to restore managed mode.[/red]")
             return False

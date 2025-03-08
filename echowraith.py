@@ -49,12 +49,16 @@ class EchoWraith:
     def change_interface(self):
         """Change the wireless interface"""
         session.clear_session()
-        interface = InterfaceManager.get_current_interface()
+        interface = session.select_interface()  # This will prompt for interface selection
         if interface:
-            console.print(f"[green]Successfully switched to interface: {interface}[/green]")
+            self.console.print(f"[green]Successfully switched to interface: {interface}[/green]")
+            # Enable monitor mode on the new interface
+            if InterfaceManager.ensure_monitor_mode():
+                self.console.print(f"[green]Successfully enabled monitor mode on {interface}[/green]")
+            else:
+                self.console.print(f"[yellow]Warning: Failed to enable monitor mode on {interface}[/yellow]")
         else:
-            console.print("[red]Failed to select interface[/red]")
-        input("\nPress Enter to continue...")
+            self.console.print("[red]Failed to select interface[/red]")
 
     def perform_system_check(self):
         """Perform comprehensive system check"""
@@ -154,7 +158,6 @@ class EchoWraith:
     def system_check(self):
         """Menu option for system check"""
         self.perform_system_check()
-        input("\nPress Enter to continue...")
 
     def clean_workspace(self):
         """Clean up all created files"""
@@ -174,17 +177,15 @@ class EchoWraith:
                     if os.path.exists(dir_path):
                         shutil.rmtree(dir_path)
                         os.makedirs(dir_path)
+                self.console.print("[green]Workspace cleaned successfully![/green]")
             else:
                 # Remove entire data directory
                 shutil.rmtree(data_dir)
-                self.console.print("[green]Workspace cleaned successfully! Exiting...[/green]")
+                self.console.print("[green]Workspace cleaned successfully![/green]")
                 sys.exit(0)
             
         except Exception as e:
             self.console.print(f"[red]Error during cleanup: {str(e)}[/red]")
-        
-        input("\nPress Enter to continue...")
-        self.exit_program()
 
     def network_scan(self):
         """Start network scanning"""
@@ -309,8 +310,6 @@ class EchoWraith:
                 scans = len([f for f in os.listdir(scans_dir) if f.endswith('.txt')])
                 self.console.print(f"[green]Network scans:[/green] {scans}")
             
-            input("\nPress Enter to continue...")
-            
         except Exception as e:
             self.console.print(f"[red]Error viewing history: {str(e)}[/red]")
 
@@ -318,23 +317,31 @@ class EchoWraith:
         """Clean up and exit the program"""
         self.console.print("[yellow]Preparing to exit...[/yellow]")
         
-        # Check if interface is in monitor mode and prompt user
+        # Check if interface is in monitor mode
         interface = InterfaceManager.get_current_interface()
         if interface and InterfaceManager.get_interface_mode() == 'monitor':
-            choice = Prompt.ask(
-                "\nInterface is in monitor mode. Do you want to restore it to managed mode?",
-                choices=["yes", "no"],
-                default="yes"
-            )
+            choice = input("\nRestore managed mode? (y/n): ").strip().lower()
             
-            if choice.lower() == "yes":
+            if choice in ['y', 'yes']:
                 self.console.print("[cyan]Restoring interface to managed mode...[/cyan]")
                 if InterfaceManager.ensure_managed_mode():
                     self.console.print(f"[green]Successfully restored {interface} to managed mode[/green]")
+                    
+                    # Ask about network manager
+                    nm_choice = input("\nRestart network manager? (y/n): ").strip().lower()
+                    if nm_choice in ['y', 'yes']:
+                        try:
+                            self.console.print("[cyan]Restarting network manager...[/cyan]")
+                            subprocess.run(['service', 'NetworkManager', 'restart'], 
+                                        stdout=subprocess.DEVNULL, 
+                                        stderr=subprocess.DEVNULL)
+                            self.console.print("[green]Network manager restarted successfully[/green]")
+                        except Exception as e:
+                            self.console.print(f"[red]Failed to restart network manager: {str(e)}[/red]")
                 else:
                     self.console.print(f"[red]Failed to restore {interface} to managed mode[/red]")
             else:
-                self.console.print("[yellow]Leaving interface in monitor mode as requested[/yellow]")
+                self.console.print("[yellow]Leaving interface in monitor mode[/yellow]")
         
         # Cleanup any leftover processes
         try:
@@ -427,10 +434,15 @@ class EchoWraith:
                 module_name, module_func, _ = self.modules[choice]
                 self.console.print(f"\n[bold green]Running {module_name}...[/bold green]")
                 
-                module_func()  # Run the selected module
+                # Run the selected module
+                module_func()
                 
-                # Only prompt for Enter once after the task is completed
-                if choice != '9':  # If not exit
+                # Only prompt for Enter if it's not exit and not clean workspace with no logs
+                if choice != '9' and not (choice == '7' and not Prompt.ask(
+                    "\n[yellow]Do you want to keep the log files?[/yellow]",
+                    choices=["y", "n"],
+                    default="y"
+                ) == "y"):
                     input("\nPress Enter to return to the menu...")
                 
             except KeyboardInterrupt:
